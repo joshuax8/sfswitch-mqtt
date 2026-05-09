@@ -75,6 +75,13 @@ function handleApiRequest(req, res, url) {
       return;
     }
 
+    if (path === '/api/topology') {
+      const topology = store.getTopology();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(topology));
+      return;
+    }
+
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'API endpoint not found' }));
   } catch (err) {
@@ -136,6 +143,11 @@ function broadcastUpdate(type, data) {
 // Periodic stats broadcast
 setInterval(() => {
   broadcastUpdate('stats', store.getStats());
+  
+  // Broadcast topology if enabled
+  if (config.PARSE_RAW_PACKETS) {
+    broadcastUpdate('topology', store.getTopology());
+  }
 }, 1000);
 
 // Start MQTT client

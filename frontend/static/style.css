@@ -452,3 +452,115 @@ body {
 .fade-in {
     animation: fadeIn 0.3s ease-in;
 }
+
+/* Topology View */
+.topology-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.topology-info {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+.topology-info span {
+    color: var(--color-text);
+    font-weight: 600;
+}
+
+.topology-legend {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.legend-dot.observer {
+    background-color: var(--color-success);
+}
+
+.legend-dot.node {
+    background-color: var(--color-primary);
+}
+
+.legend-line {
+    width: 20px;
+    height: 2px;
+    background-color: var(--color-border);
+}
+
+.topology-container {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    height: 500px;
+    position: relative;
+}
+
+.topology-container canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.topology-table {
+    margin-top: 1rem;
+}
+
+.topology-table details {
+    margin-bottom: 1rem;
+}
+
+.topology-table summary {
+    padding: 0.75rem 1rem;
+    background-color: var(--color-surface-light);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+}
+
+.topology-table summary:hover {
+    background-color: var(--color-border);
+}
+
+.topology-table .data-table {
+    margin-top: 0.5rem;
+}
+
+.font-mono {
+    font-family: var(--font-mono);
+}
+
+/* Status indicator in topology */
+#topology-status {
+    color: var(--color-warning);
+    font-style: italic;
+}
+
+#topology-status.enabled {
+    color: var(--color-success);
+    font-style: normal;
+}
+
+#topology-status.disabled {
+    color: var(--color-danger);
+}

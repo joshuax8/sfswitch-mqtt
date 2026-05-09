@@ -25,6 +25,12 @@ const state = {
         bufferCapacity: 0,
         observerCount: 0,
     },
+    topology: {
+        enabled: false,
+        nodes: [],
+        edges: [],
+        observers: [],
+    },
     
     // UI state
     currentView: 'overview',
@@ -63,6 +69,14 @@ const elements = {
     
     // Stats
     perObserverStats: document.getElementById('per-observer-stats'),
+    
+    // Topology
+    topologyNodeCount: document.getElementById('topology-node-count'),
+    topologyEdgeCount: document.getElementById('topology-edge-count'),
+    topologyStatus: document.getElementById('topology-status'),
+    topologyCanvas: document.getElementById('topology-canvas'),
+    topologyNodesTable: document.getElementById('topology-nodes-table'),
+    topologyEdgesTable: document.getElementById('topology-edges-table'),
 };
 
 // ============================================
@@ -185,6 +199,7 @@ function connectWebSocket() {
             fetchStats();
             fetchObservers();
             fetchPackets();
+            fetchTopology();
         };
         
         ws.onmessage = (event) => {
@@ -235,6 +250,12 @@ function handleWebSocketMessage(data) {
             break;
         case 'observers':
             state.observers = data.data;
+            break;
+        case 'topology':
+            state.topology = {
+                enabled: true,
+                ...data.data,
+            };
             break;
     }
     state.lastUpdate = new Date();
@@ -303,6 +324,22 @@ async function fetchPackets(limit = 100) {
     }
 }
 
+async function fetchTopology() {
+    try {
+        const response = await fetch('/api/topology');
+        const data = await response.json();
+        state.topology = {
+            enabled: !data.error,
+            ...data,
+        };
+        state.lastUpdate = new Date();
+        updateUI();
+    } catch (err) {
+        console.error('Failed to fetch topology:', err);
+        state.topology.enabled = false;
+    }
+}
+
 // ============================================
 // UI Updates
 // ============================================
@@ -354,6 +391,9 @@ function updateUI() {
             break;
         case 'stats':
             renderStats();
+            break;
+        case 'topology':
+            renderTopology();
             break;
     }
 }
@@ -478,6 +518,227 @@ function renderStats() {
     }
 }
 
+function renderTopology() {
+    // Update topology info
+    if (elements.topologyNodeCount) {
+        elements.topologyNodeCount.textContent = formatNumber(state.topology.nodes?.length || 0);
+    }
+    if (elements.topologyEdgeCount) {
+        elements.topologyEdgeCount.textContent = formatNumber(state.topology.edges?.length || 0);
+    }
+    if (elements.topologyStatus) {
+        if (state.topology.enabled) {
+            elements.topologyStatus.className = 'enabled';
+            elements.topologyStatus.textContent = 'Topology: Enabled';
+        } else {
+            elements.topologyStatus.className = 'disabled';
+            elements.topologyStatus.textContent = 'Topology: Disabled (set PARSE_RAW_PACKETS=true)';
+        }
+    }
+    
+    // Render topology tables
+    renderTopologyTables();
+    
+    // Render topology canvas
+    renderTopologyCanvas();
+}
+
+function renderTopologyTables() {
+    // Render nodes table
+    if (elements.topologyNodesTable) {
+        if (!state.topology.nodes || state.topology.nodes.length === 0) {
+            elements.topologyNodesTable.innerHTML = '<tr class="empty-state"><td colspan="4">No nodes found</td></tr>';
+        } else {
+            const html = state.topology.nodes.map(node => {
+                const observer = state.topology.observers?.find(o => o.hash === node.hash);
+                const type = observer ? 'Observer' : 'Node';
+                return `
+                    <tr>
+                        <td class="font-mono">${truncate(node.hash, 20)}</td>
+                        <td>${type}</td>
+                        <td class="font-mono">${formatNumber(node.packetCount)}</td>
+                        <td>${timeAgo(node.lastSeen)}</td>
+                    </tr>
+                `;
+            }).join('');
+            elements.topologyNodesTable.innerHTML = html;
+        }
+    }
+    
+    // Render edges table
+    if (elements.topologyEdgesTable) {
+        if (!state.topology.edges || state.topology.edges.length === 0) {
+            elements.topologyEdgesTable.innerHTML = '<tr class="empty-state"><td colspan="4">No edges found</td></tr>';
+        } else {
+            const html = state.topology.edges.map(edge => `
+                <tr>
+                    <td class="font-mono">${truncate(edge.from, 20)}</td>
+                    <td class="font-mono">${truncate(edge.to, 20)}</td>
+                    <td class="font-mono">${formatNumber(edge.count)}</td>
+                    <td>${timeAgo(edge.lastSeen)}</td>
+                </tr>
+            `).join('');
+            elements.topologyEdgesTable.innerHTML = html;
+        }
+    }
+}
+
+// Topology Canvas Renderer
+function renderTopologyCanvas() {
+    if (!elements.topologyCanvas) return;
+    
+    const canvas = elements.topologyCanvas;
+    const ctx = canvas.getContext('2d');
+    
+    // Set canvas size to match container
+    const container = canvas.parentElement;
+    if (container) {
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+    }
+    
+    if (!state.topology.nodes || state.topology.nodes.length === 0) {
+        // Clear and display message
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#64748b';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No topology data available. Enable PARSE_RAW_PACKETS.', canvas.width / 2, canvas.height / 2);
+        return;
+    }
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Simple force-directed layout simulation
+    const nodes = state.topology.nodes || [];
+    const edges = state.topology.edges || [];
+    const observerHashes = new Set(state.topology.observers?.map(o => o.hash) || []);
+    
+    // Initialize positions if not present
+    const positions = {};
+    const radius = 20;
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    
+    // Assign initial positions in a circle
+    const angleStep = (2 * Math.PI) / nodes.length;
+    nodes.forEach((node, i) => {
+        const angle = i * angleStep;
+        positions[node.hash] = {
+            x: centerX + Math.cos(angle) * Math.min(canvas.width, canvas.height) * 0.4,
+            y: centerY + Math.sin(angle) * Math.min(canvas.width, canvas.height) * 0.4,
+        };
+    });
+    
+    // Simple repulsion/attraction simulation (20 iterations)
+    const repulsion = 100;
+    const attraction = 0.1;
+    const damping = 0.8;
+    
+    for (let iter = 0; iter < 20; iter++) {
+        // Repulsion between all nodes
+        for (let i = 0; i < nodes.length; i++) {
+            for (let j = i + 1; j < nodes.length; j++) {
+                const a = nodes[i];
+                const b = nodes[j];
+                const posA = positions[a.hash];
+                const posB = positions[b.hash];
+                
+                const dx = posB.x - posA.x;
+                const dy = posB.y - posA.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < 1) dist = 1;
+                
+                const force = repulsion / (dist * dist);
+                const fx = (dx / dist) * force;
+                const fy = (dy / dist) * force;
+                
+                posA.vx = (posA.vx || 0) - fx;
+                posA.vy = (posA.vy || 0) - fy;
+                posB.vx = (posB.vx || 0) + fx;
+                posB.vy = (posB.vy || 0) + fy;
+            }
+        }
+        
+        // Attraction along edges
+        edges.forEach(edge => {
+            const posA = positions[edge.from];
+            const posB = positions[edge.to];
+            if (!posA || !posB) return;
+            
+            const dx = posB.x - posA.x;
+            const dy = posB.y - posA.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            if (dist < 1) dist = 1;
+            
+            const force = attraction * dist;
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+            
+            posA.vx = (posA.vx || 0) + fx;
+            posA.vy = (posA.vy || 0) + fy;
+            posB.vx = (posB.vx || 0) - fx;
+            posB.vy = (posB.vy || 0) - fy;
+        });
+        
+        // Apply velocities with damping
+        nodes.forEach(node => {
+            const pos = positions[node.hash];
+            if (pos.vx || pos.vy) {
+                pos.x += (pos.vx || 0) * damping;
+                pos.y += (pos.vy || 0) * damping;
+                pos.vx = (pos.vx || 0) * damping;
+                pos.vy = (pos.vy || 0) * damping;
+            }
+        });
+    }
+    
+    // Draw edges first
+    ctx.strokeStyle = '#475569';
+    ctx.lineWidth = 1;
+    edges.forEach(edge => {
+        const posA = positions[edge.from];
+        const posB = positions[edge.to];
+        if (!posA || !posB) return;
+        
+        ctx.beginPath();
+        ctx.moveTo(posA.x, posA.y);
+        ctx.lineTo(posB.x, posB.y);
+        ctx.stroke();
+    });
+    
+    // Draw nodes
+    nodes.forEach(node => {
+        const pos = positions[node.hash];
+        if (!pos) return;
+        
+        const isObserver = observerHashes.has(node.hash);
+        
+        // Draw node circle
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, radius, 0, 2 * Math.PI);
+        ctx.fillStyle = isObserver ? '#22c55e' : '#2563eb';
+        ctx.fill();
+        
+        // Draw node label (shortened hash)
+        const label = truncate(node.hash, 8);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, pos.x, pos.y);
+    });
+    
+    // Draw node count in corner
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${nodes.length} nodes, ${edges.length} edges`, 10, 20);
+}
+
 // ============================================
 // Event Handlers
 // ============================================
@@ -553,6 +814,13 @@ function initEventHandlers() {
         });
     }
     
+    // Window resize - re-render topology canvas
+    window.addEventListener('resize', () => {
+        if (state.currentView === 'topology') {
+            renderTopologyCanvas();
+        }
+    });
+    
     // Periodic refresh
     setInterval(() => {
         if (state.wsConnected) {
@@ -563,6 +831,7 @@ function initEventHandlers() {
         fetchHealth();
         fetchStats();
         fetchObservers();
+        fetchTopology();
     }, 5000);
 }
 

@@ -27,6 +27,7 @@
             <a href="#observers" class="nav-link" data-view="observers">Observers</a>
             <a href="#packets" class="nav-link" data-view="packets">Packets</a>
             <a href="#stats" class="nav-link" data-view="stats">Statistics</a>
+            <a href="#topology" class="nav-link" data-view="topology">Topology</a>
         </nav>
 
         <main class="main">
@@ -156,6 +157,58 @@
                             </tbody>
                         </table>
                     </div>
+                </div>
+            </section>
+
+            <!-- Topology View -->
+            <section id="topology" class="view">
+                <h2>Network Topology</h2>
+                <div class="topology-controls">
+                    <div class="topology-info" id="topology-info">
+                        Nodes: <span id="topology-node-count">0</span> | 
+                        Edges: <span id="topology-edge-count">0</span> |
+                        <span id="topology-status"></span>
+                    </div>
+                    <div class="topology-legend">
+                        <span class="legend-item"><span class="legend-dot observer"></span> Observer</span>
+                        <span class="legend-item"><span class="legend-dot node"></span> Node</span>
+                        <span class="legend-item"><span class="legend-line"></span> Connection</span>
+                    </div>
+                </div>
+                <div class="topology-container">
+                    <canvas id="topology-canvas"></canvas>
+                </div>
+                <div class="table-container topology-table">
+                    <details>
+                        <summary>Node Details</summary>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Hash</th>
+                                    <th>Type</th>
+                                    <th>Packets</th>
+                                    <th>Last Seen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="topology-nodes-table">
+                            </tbody>
+                        </table>
+                    </details>
+                    <details>
+                        <summary>Edge Details</summary>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>From</th>
+                                    <th>To</th>
+                                    <th>Count</th>
+                                    <th>Last Seen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="topology-edges-table">
+                            </tbody>
+                        </table>
+                    </details>
                 </div>
             </section>
         </main>

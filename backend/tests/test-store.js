@@ -1,8 +1,6 @@
 const assert = require('assert');
 
-// Test RingBuffer directly by importing the class
-// We'll create a minimal test that doesn't need the full module
-
+// Test RingBuffer
 console.log('Testing RingBuffer...');
 
 class RingBuffer {
@@ -266,5 +264,139 @@ ag.resetWindow();
 assert.strictEqual(ag.windowPackets, 0);
 
 console.log('AggregationStore tests passed!');
+
+// Test TopologyTracker
+console.log('\nTesting TopologyTracker...');
+
+class TopologyTracker {
+  constructor() {
+    this.nodes = new Map();
+    this.edges = new Map();
+    this.observers = new Map();
+  }
+
+  updateFromPacket(packet) {
+    if (!packet.raw) {
+      return false;
+    }
+
+    try {
+      const raw = Buffer.from(packet.raw, 'hex');
+      if (raw.length < 2) return false;
+
+      // Parse path_len byte (simplified - we're not using header byte yet)
+      const pathLenByte = raw[1];
+      const hashSize = (pathLenByte >> 6) + 1;
+      const hashCount = pathLenByte & 0x3F;
+
+      // Parse path hashes
+      const pathHashes = [];
+      let offset = 2;
+      
+      for (let i = 0; i < hashCount; i++) {
+        const hashBytes = raw.slice(offset, offset + hashSize);
+        const hash = hashBytes.toString('hex');
+        pathHashes.push(hash);
+        offset += hashSize;
+      }
+
+      // Map origin_id to first hash in path
+      if (pathHashes.length > 0) {
+        this.observers.set(packet.origin_id, pathHashes[0]);
+      }
+
+      // Register all nodes in path
+      for (const hash of pathHashes) {
+        if (!this.nodes.has(hash)) {
+          this.nodes.set(hash, {
+            hash,
+            firstSeen: Date.now(),
+            lastSeen: Date.now(),
+            packetCount: 0,
+          });
+        }
+        const node = this.nodes.get(hash);
+        node.lastSeen = Date.now();
+        node.packetCount++;
+      }
+
+      // Register edges between consecutive nodes in path
+      for (let i = 0; i < pathHashes.length - 1; i++) {
+        const from = pathHashes[i];
+        const to = pathHashes[i + 1];
+        const edgeKey = `${from}->${to}`;
+        
+        if (!this.edges.has(edgeKey)) {
+          this.edges.set(edgeKey, {
+            from,
+            to,
+            count: 0,
+            lastSeen: Date.now(),
+          });
+        }
+        const edge = this.edges.get(edgeKey);
+        edge.count++;
+        edge.lastSeen = Date.now();
+      }
+
+      return true;
+    } catch (err) {
+      console.error('Error parsing topology:', err.message);
+      return false;
+    }
+  }
+
+  getTopology() {
+    return {
+      nodes: Array.from(this.nodes.values()).map(n => ({
+        ...n,
+        lastSeen: new Date(n.lastSeen).toISOString(),
+      })),
+      edges: Array.from(this.edges.values()).map(e => ({
+        ...e,
+        lastSeen: new Date(e.lastSeen).toISOString(),
+      })),
+      observers: Array.from(this.observers.entries()).map(([originId, hash]) => ({
+        originId,
+        hash,
+      })),
+    };
+  }
+}
+
+const tt = new TopologyTracker();
+
+// Test with a sample packet that has path data
+// Raw format: [header:1] [path_len:1] [path hash 1] [path hash 2]...
+// For testing, we'll create a fake raw hex with 2 hashes of size 1
+// path_len byte: hash_size-1 in top 2 bits, count in bottom 6 bits
+// For hashSize=1, count=2: path_len = (0 << 6) | 2 = 2 = 0x02
+// Then 2 hashes of 1 byte each: 0x01, 0x02
+// Total raw: 00 02 01 02 (but we need header byte first)
+const testPacket = {
+  origin_id: 'test-observer',
+  raw: '00020102', // header=0x00, path_len=0x02, hash1=0x01, hash2=0x02
+};
+
+const result = tt.updateFromPacket(testPacket);
+assert.strictEqual(result, true);
+assert.strictEqual(tt.nodes.size, 2);
+assert.strictEqual(tt.edges.size, 1);
+assert.strictEqual(tt.observers.size, 1);
+
+const topology = tt.getTopology();
+assert.strictEqual(topology.nodes.length, 2);
+assert.strictEqual(topology.edges.length, 1);
+assert.strictEqual(topology.observers.length, 1);
+
+// Check first node hash is '01'
+assert.strictEqual(topology.nodes[0].hash, '01');
+assert.strictEqual(topology.nodes[1].hash, '02');
+
+// Check edge
+assert.strictEqual(topology.edges[0].from, '01');
+assert.strictEqual(topology.edges[0].to, '02');
+
+console.log('TopologyTracker tests passed!');
 
 console.log('\nAll store component tests passed!');

@@ -94,37 +94,10 @@ class MqttClient {
         return;
       }
 
-      // Add to store
+      // Add to store (store handles raw parsing for topology if enabled)
       store.addPacket(packet);
-
-      // Optional raw parsing (disabled by default)
-      if (config.PARSE_RAW_PACKETS && packet.raw) {
-        this.parseRawPacket(packet);
-      }
     } catch (err) {
       console.error('Error processing MQTT message:', err.message);
-    }
-  }
-
-  parseRawPacket(packet) {
-    // Parse MeshCore header from raw hex
-    try {
-      const raw = Buffer.from(packet.raw, 'hex');
-      if (raw.length < 1) return;
-
-      const header = raw[0];
-      const routeType = header & 0x03;
-      const payloadType = (header >> 2) & 0x0F;
-      const payloadVersion = (header >> 6) & 0x03;
-
-      packet.parsed = {
-        routeType,
-        payloadType,
-        payloadVersion,
-        rawLength: raw.length,
-      };
-    } catch (err) {
-      console.error('Error parsing raw packet:', err.message);
     }
   }
 

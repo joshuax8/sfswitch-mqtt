@@ -193,6 +193,134 @@ class AggregationStore {
 }
 
 /**
+ * Topology Tracker
+ * Extracts network topology from MeshCore packet paths
+ */
+class TopologyTracker {
+  constructor() {
+    this.nodes = new Map(); // hash -> node info
+    this.edges = new Map(); // "hash1->hash2" -> edge info
+    this.observers = new Map(); // origin_id -> observer node hash
+  }
+
+  updateFromPacket(packet) {
+    if (!packet.raw || !config.PARSE_RAW_PACKETS) {
+      return false;
+    }
+
+    try {
+      const raw = Buffer.from(packet.raw, 'hex');
+      if (raw.length < 2) return false;
+
+      // Parse header byte
+      const header = raw[0];
+      const routeType = header & 0x03;
+      const payloadType = (header >> 2) & 0x0F;
+      const payloadVersion = (header >> 6) & 0x03;
+
+      // Parse path_len byte
+      const pathLenByte = raw[1];
+      const hashSize = (pathLenByte >> 6) + 1; // 1-3 bytes
+      const hashCount = pathLenByte & 0x3F; // 0-63 hashes
+
+      // Parse path hashes
+      const pathHashes = [];
+      let offset = 2; // After header + path_len
+      
+      for (let i = 0; i < hashCount; i++) {
+        const hashBytes = raw.slice(offset, offset + hashSize);
+        const hash = hashBytes.toString('hex');
+        pathHashes.push(hash);
+        offset += hashSize;
+      }
+
+      // Map origin_id to first hash in path (or observer's own hash)
+      if (pathHashes.length > 0) {
+        this.observers.set(packet.origin_id, pathHashes[0]);
+      }
+
+      // Register all nodes in path
+      for (const hash of pathHashes) {
+        if (!this.nodes.has(hash)) {
+          this.nodes.set(hash, {
+            hash,
+            firstSeen: Date.now(),
+            lastSeen: Date.now(),
+            packetCount: 0,
+          });
+        }
+        const node = this.nodes.get(hash);
+        node.lastSeen = Date.now();
+        node.packetCount++;
+      }
+
+      // Register edges between consecutive nodes in path
+      for (let i = 0; i < pathHashes.length - 1; i++) {
+        const from = pathHashes[i];
+        const to = pathHashes[i + 1];
+        const edgeKey = `${from}->${to}`;
+        
+        if (!this.edges.has(edgeKey)) {
+          this.edges.set(edgeKey, {
+            from,
+            to,
+            count: 0,
+            lastSeen: Date.now(),
+          });
+        }
+        const edge = this.edges.get(edgeKey);
+        edge.count++;
+        edge.lastSeen = Date.now();
+      }
+
+      return true;
+    } catch (err) {
+      console.error('Error parsing topology:', err.message);
+      return false;
+    }
+  }
+
+  getTopology() {
+    return {
+      nodes: Array.from(this.nodes.values()).map(n => ({
+        ...n,
+        lastSeen: new Date(n.lastSeen).toISOString(),
+      })),
+      edges: Array.from(this.edges.values()).map(e => ({
+        ...e,
+        lastSeen: new Date(e.lastSeen).toISOString(),
+      })),
+      observers: Array.from(this.observers.entries()).map(([originId, hash]) => ({
+        originId,
+        hash,
+      })),
+    };
+  }
+
+  getNode(hash) {
+    return this.nodes.get(hash);
+  }
+
+  cleanup(staleMs = 3600000) { // 1 hour
+    const now = Date.now();
+    
+    // Remove stale nodes
+    for (const [hash, node] of this.nodes) {
+      if (now - node.lastSeen > staleMs) {
+        this.nodes.delete(hash);
+      }
+    }
+    
+    // Remove stale edges
+    for (const [key, edge] of this.edges) {
+      if (now - edge.lastSeen > staleMs) {
+        this.edges.delete(key);
+      }
+    }
+  }
+}
+
+/**
  * Main Data Store
  * Combines ring buffer, observer tracking, and aggregations
  */
@@ -202,6 +330,7 @@ class DataStore {
     this.ringBuffer = new RingBuffer(config.PACKET_BUFFER_SIZE);
     this.observerTracker = new ObserverTracker(config.OBSERVER_TIMEOUT);
     this.aggregationStore = new AggregationStore();
+    this.topologyTracker = new TopologyTracker();
     
     // SQLite persistence
     this.db = null;
@@ -215,7 +344,12 @@ class DataStore {
     
     // Cleanup interval
     this.cleanupInterval = setInterval(
-      () => this.observerTracker.cleanup(),
+      () => {
+        this.observerTracker.cleanup();
+        if (config.PARSE_RAW_PACKETS) {
+          this.topologyTracker.cleanup();
+        }
+      },
       config.OBSERVER_TIMEOUT * 1000
     );
   }
@@ -259,6 +393,11 @@ class DataStore {
     
     // Update observer tracker
     this.observerTracker.update(packet.origin, packet.origin_id, packet);
+    
+    // Update topology tracker (optional, only if parsing enabled)
+    if (config.PARSE_RAW_PACKETS) {
+      this.topologyTracker.updateFromPacket(packet);
+    }
     
     // Persist to SQLite (fire and forget - don't block hot path)
     if (this.db) {
@@ -320,7 +459,20 @@ class DataStore {
       packetsStored: this.ringBuffer.size,
       observersTracked: this.observerTracker.count,
       dbConnected: this.db !== null,
+      topologyEnabled: config.PARSE_RAW_PACKETS,
     };
+  }
+
+  getTopology() {
+    if (!config.PARSE_RAW_PACKETS) {
+      return {
+        error: 'Topology tracking disabled. Set PARSE_RAW_PACKETS=true in .env',
+        nodes: [],
+        edges: [],
+        observers: [],
+      };
+    }
+    return this.topologyTracker.getTopology();
   }
 
   close() {
