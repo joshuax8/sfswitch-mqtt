@@ -82,6 +82,44 @@ function handleApiRequest(req, res, url) {
       return;
     }
 
+    if (path === '/api/alerts') {
+      const alerts = store.getAlerts();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(alerts));
+      return;
+    }
+
+    if (path === '/api/alerts/active') {
+      const alerts = store.getActiveAlerts();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(alerts));
+      return;
+    }
+
+    if (path === '/api/alerts/acknowledge') {
+      const id = url.searchParams.get('id');
+      const by = url.searchParams.get('by') || 'system';
+      
+      if (!id) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing alert id' }));
+        return;
+      }
+      
+      const success = store.acknowledgeAlert(id, by);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success, alertId: id }));
+      return;
+    }
+
+    if (path === '/api/alerts/acknowledge-all') {
+      const by = url.searchParams.get('by') || 'system';
+      const count = store.acknowledgeAllAlerts(by);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, count }));
+      return;
+    }
+
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'API endpoint not found' }));
   } catch (err) {
@@ -148,6 +186,9 @@ setInterval(() => {
   if (config.PARSE_RAW_PACKETS) {
     broadcastUpdate('topology', store.getTopology());
   }
+  
+  // Broadcast alerts
+  broadcastUpdate('alerts', store.getActiveAlerts());
 }, 1000);
 
 // Start MQTT client

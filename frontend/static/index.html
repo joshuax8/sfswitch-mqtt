@@ -28,6 +28,7 @@
             <a href="#packets" class="nav-link" data-view="packets">Packets</a>
             <a href="#stats" class="nav-link" data-view="stats">Statistics</a>
             <a href="#topology" class="nav-link" data-view="topology">Topology</a>
+            <a href="#alerts" class="nav-link" data-view="alerts">Alerts</a>
         </nav>
 
         <main class="main">
@@ -209,6 +210,44 @@
                             </tbody>
                         </table>
                     </details>
+                </div>
+            </section>
+
+            <!-- Alerts View -->
+            <section id="alerts" class="view">
+                <h2>Alerts</h2>
+                <div class="alerts-header">
+                    <div class="alerts-summary">
+                        <span id="alerts-active-count" class="alert-count">0</span> active alerts
+                    </div>
+                    <div class="alerts-actions">
+                        <button id="acknowledge-all-alerts" class="btn">Acknowledge All</button>
+                        <button id="refresh-alerts" class="btn">Refresh</button>
+                    </div>
+                </div>
+                <div class="alerts-container">
+                    <div class="alerts-list" id="alerts-list">
+                        <div class="empty-state">No active alerts</div>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Severity</th>
+                                <th>Type</th>
+                                <th>Message</th>
+                                <th>Observer</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="alerts-table-body">
+                            <tr class="empty-state">
+                                <td colspan="6">No alerts found</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </section>
         </main>

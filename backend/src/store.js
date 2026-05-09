@@ -193,6 +193,165 @@ class AggregationStore {
 }
 
 /**
+ * Alert Manager
+ * Tracks and manages alerts for observers based on configurable thresholds
+ */
+class AlertManager {
+  constructor() {
+    this.config = config;
+    this.alerts = new Map(); // alertId -> alert
+    this.alertCounter = 0;
+    this.lastCheck = Date.now();
+  }
+
+  checkObservers(observers) {
+    const now = Date.now();
+    const snrThreshold = this.config.ALERT_SNR_THRESHOLD;
+    const rssiThreshold = this.config.ALERT_RSSI_THRESHOLD;
+    const timeoutThreshold = this.config.ALERT_OBSERVER_TIMEOUT * 1000;
+    
+    observers.forEach(observer => {
+      const avgSNR = observer.totalSNR / observer.packetCount;
+      const avgRSSI = observer.totalRSSI / observer.packetCount;
+      const isOffline = now - observer.lastSeen > timeoutThreshold;
+      
+      // Check for SNR alert
+      if (avgSNR < snrThreshold) {
+        this._createOrUpdateAlert(
+          `snr-${observer.originId}`,
+          'SNR',
+          'warning',
+          `Observer ${observer.name} has low SNR: ${avgSNR.toFixed(1)} dB`,
+          observer.originId,
+          { type: 'SNR', value: avgSNR, threshold: snrThreshold }
+        );
+      } else {
+        this._clearAlert(`snr-${observer.originId}`);
+      }
+      
+      // Check for RSSI alert
+      if (avgRSSI < rssiThreshold) {
+        this._createOrUpdateAlert(
+          `rssi-${observer.originId}`,
+          'RSSI',
+          'warning',
+          `Observer ${observer.name} has low RSSI: ${avgRSSI} dBm`,
+          observer.originId,
+          { type: 'RSSI', value: avgRSSI, threshold: rssiThreshold }
+        );
+      } else {
+        this._clearAlert(`rssi-${observer.originId}`);
+      }
+      
+      // Check for offline alert
+      if (isOffline) {
+        this._createOrUpdateAlert(
+          `offline-${observer.originId}`,
+          'Offline',
+          'critical',
+          `Observer ${observer.name} is offline (last seen: ${new Date(observer.lastSeen).toISOString()})`,
+          observer.originId,
+          { type: 'offline', lastSeen: observer.lastSeen }
+        );
+      } else {
+        this._clearAlert(`offline-${observer.originId}`);
+      }
+    });
+    
+    this.lastCheck = now;
+    return this.getAlerts();
+  }
+
+  _createOrUpdateAlert(id, type, severity, message, originId, details) {
+    const existing = this.alerts.get(id);
+    
+    if (existing) {
+      // Update existing alert
+      existing.lastUpdated = Date.now();
+      existing.message = message;
+      existing.details = details;
+    } else {
+      // Create new alert
+      this.alertCounter++;
+      this.alerts.set(id, {
+        id,
+        alertId: this.alertCounter,
+        type,
+        severity,
+        message,
+        originId,
+        details,
+        createdAt: Date.now(),
+        lastUpdated: Date.now(),
+        acknowledged: false,
+        acknowledgedAt: null,
+        acknowledgedBy: null,
+      });
+    }
+  }
+
+  _clearAlert(id) {
+    this.alerts.delete(id);
+  }
+
+  getAlerts() {
+    return Array.from(this.alerts.values()).map(a => ({
+      ...a,
+      createdAt: new Date(a.createdAt).toISOString(),
+      lastUpdated: new Date(a.lastUpdated).toISOString(),
+    }));
+  }
+
+  getActiveAlerts() {
+    return this.getAlerts().filter(a => !a.acknowledged);
+  }
+
+  getAlert(id) {
+    const alert = this.alerts.get(id);
+    if (alert) {
+      return {
+        ...alert,
+        createdAt: new Date(alert.createdAt).toISOString(),
+        lastUpdated: new Date(alert.lastUpdated).toISOString(),
+      };
+    }
+    return null;
+  }
+
+  acknowledgeAlert(id, by = 'system') {
+    const alert = this.alerts.get(id);
+    if (alert) {
+      alert.acknowledged = true;
+      alert.acknowledgedAt = Date.now();
+      alert.acknowledgedBy = by;
+      return true;
+    }
+    return false;
+  }
+
+  acknowledgeAll(by = 'system') {
+    for (const [id, alert] of this.alerts) {
+      alert.acknowledged = true;
+      alert.acknowledgedAt = Date.now();
+      alert.acknowledgedBy = by;
+    }
+    return this.alerts.size;
+  }
+
+  clearAll() {
+    this.alerts.clear();
+  }
+
+  get count() {
+    return this.alerts.size;
+  }
+
+  get activeCount() {
+    return this.getActiveAlerts().length;
+  }
+}
+
+/**
  * Topology Tracker
  * Extracts network topology from MeshCore packet paths
  */
@@ -331,6 +490,7 @@ class DataStore {
     this.observerTracker = new ObserverTracker(config.OBSERVER_TIMEOUT);
     this.aggregationStore = new AggregationStore();
     this.topologyTracker = new TopologyTracker();
+    this.alertManager = new AlertManager();
     
     // SQLite persistence
     this.db = null;
@@ -340,6 +500,15 @@ class DataStore {
     this.windowInterval = setInterval(
       () => this.aggregationStore.resetWindow(),
       config.AGGREGATION_WINDOW * 1000
+    );
+    
+    // Alert check interval
+    this.alertInterval = setInterval(
+      () => {
+        const observers = this.observerTracker.getAll();
+        this.alertManager.checkObservers(observers);
+      },
+      config.ALERT_CHECK_INTERVAL * 1000
     );
     
     // Cleanup interval
@@ -460,6 +629,8 @@ class DataStore {
       observersTracked: this.observerTracker.count,
       dbConnected: this.db !== null,
       topologyEnabled: config.PARSE_RAW_PACKETS,
+      alertsActive: this.alertManager.activeCount,
+      alertsTotal: this.alertManager.count,
     };
   }
 
@@ -475,8 +646,30 @@ class DataStore {
     return this.topologyTracker.getTopology();
   }
 
+  // Alert methods
+  getAlerts() {
+    return this.alertManager.getAlerts();
+  }
+
+  getActiveAlerts() {
+    return this.alertManager.getActiveAlerts();
+  }
+
+  getAlert(id) {
+    return this.alertManager.getAlert(id);
+  }
+
+  acknowledgeAlert(id, by = 'system') {
+    return this.alertManager.acknowledgeAlert(id, by);
+  }
+
+  acknowledgeAllAlerts(by = 'system') {
+    return this.alertManager.acknowledgeAll(by);
+  }
+
   close() {
     clearInterval(this.windowInterval);
+    clearInterval(this.alertInterval);
     clearInterval(this.cleanupInterval);
     if (this.db) {
       this.db.close();

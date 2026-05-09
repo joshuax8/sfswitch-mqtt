@@ -28,6 +28,12 @@ const defaults = {
   
   // Observer timeout (seconds without packets to mark as offline)
   OBSERVER_TIMEOUT: 300,
+  
+  // Alerting Configuration
+  ALERT_SNR_THRESHOLD: -10,      // dB - SNR below this triggers alert
+  ALERT_RSSI_THRESHOLD: -90,     // dBm - RSSI below this triggers alert
+  ALERT_OBSERVER_TIMEOUT: 600,   // seconds - observer offline after this time
+  ALERT_CHECK_INTERVAL: 10,      // seconds - how often to check for alerts
 };
 
 // Validate required MQTT config
@@ -43,7 +49,7 @@ const config = { ...defaults };
 for (const key in defaults) {
   if (process.env[key] !== undefined) {
     // Convert numeric strings to numbers
-    if (['BACKEND_PORT', 'WS_PORT', 'PACKET_BUFFER_SIZE', 'AGGREGATION_WINDOW', 'OBSERVER_TIMEOUT'].includes(key)) {
+    if (['BACKEND_PORT', 'WS_PORT', 'PACKET_BUFFER_SIZE', 'AGGREGATION_WINDOW', 'OBSERVER_TIMEOUT', 'ALERT_SNR_THRESHOLD', 'ALERT_RSSI_THRESHOLD', 'ALERT_OBSERVER_TIMEOUT', 'ALERT_CHECK_INTERVAL'].includes(key)) {
       config[key] = Number(process.env[key]);
     } else if (['PARSE_RAW_PACKETS'].includes(key)) {
       config[key] = process.env[key] === 'true';

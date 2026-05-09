@@ -399,4 +399,214 @@ assert.strictEqual(topology.edges[0].to, '02');
 
 console.log('TopologyTracker tests passed!');
 
+// Test AlertManager
+console.log('\nTesting AlertManager...');
+
+class AlertManager {
+  constructor() {
+    this.alerts = new Map();
+    this.alertCounter = 0;
+    this.lastCheck = Date.now();
+  }
+
+  checkObservers(observers) {
+    const now = Date.now();
+    const snrThreshold = -10;
+    const rssiThreshold = -90;
+    const timeoutThreshold = 600 * 1000; // 10 minutes
+    
+    observers.forEach(observer => {
+      const avgSNR = observer.totalSNR / observer.packetCount;
+      const avgRSSI = observer.totalRSSI / observer.packetCount;
+      const isOffline = now - observer.lastSeen > timeoutThreshold;
+      
+      // Check for SNR alert
+      if (avgSNR < snrThreshold) {
+        this._createOrUpdateAlert(
+          `snr-${observer.originId}`,
+          'SNR',
+          'warning',
+          `Observer ${observer.name} has low SNR: ${avgSNR.toFixed(1)} dB`,
+          observer.originId,
+          { type: 'SNR', value: avgSNR, threshold: snrThreshold }
+        );
+      } else {
+        this._clearAlert(`snr-${observer.originId}`);
+      }
+      
+      // Check for RSSI alert
+      if (avgRSSI < rssiThreshold) {
+        this._createOrUpdateAlert(
+          `rssi-${observer.originId}`,
+          'RSSI',
+          'warning',
+          `Observer ${observer.name} has low RSSI: ${avgRSSI} dBm`,
+          observer.originId,
+          { type: 'RSSI', value: avgRSSI, threshold: rssiThreshold }
+        );
+      } else {
+        this._clearAlert(`rssi-${observer.originId}`);
+      }
+      
+      // Check for offline alert
+      if (isOffline) {
+        this._createOrUpdateAlert(
+          `offline-${observer.originId}`,
+          'Offline',
+          'critical',
+          `Observer ${observer.name} is offline (last seen: ${new Date(observer.lastSeen).toISOString()})`,
+          observer.originId,
+          { type: 'offline', lastSeen: observer.lastSeen }
+        );
+      } else {
+        this._clearAlert(`offline-${observer.originId}`);
+      }
+    });
+    
+    this.lastCheck = now;
+    return this.getAlerts();
+  }
+
+  _createOrUpdateAlert(id, type, severity, message, originId, details) {
+    const existing = this.alerts.get(id);
+    
+    if (existing) {
+      existing.lastUpdated = Date.now();
+      existing.message = message;
+      existing.details = details;
+    } else {
+      this.alertCounter++;
+      this.alerts.set(id, {
+        id,
+        alertId: this.alertCounter,
+        type,
+        severity,
+        message,
+        originId,
+        details,
+        createdAt: Date.now(),
+        lastUpdated: Date.now(),
+        acknowledged: false,
+        acknowledgedAt: null,
+        acknowledgedBy: null,
+      });
+    }
+  }
+
+  _clearAlert(id) {
+    this.alerts.delete(id);
+  }
+
+  getAlerts() {
+    return Array.from(this.alerts.values()).map(a => ({
+      ...a,
+      createdAt: new Date(a.createdAt).toISOString(),
+      lastUpdated: new Date(a.lastUpdated).toISOString(),
+    }));
+  }
+
+  getActiveAlerts() {
+    return this.getAlerts().filter(a => !a.acknowledged);
+  }
+
+  getAlert(id) {
+    const alert = this.alerts.get(id);
+    if (alert) {
+      return {
+        ...alert,
+        createdAt: new Date(alert.createdAt).toISOString(),
+        lastUpdated: new Date(alert.lastUpdated).toISOString(),
+      };
+    }
+    return null;
+  }
+
+  acknowledgeAlert(id, by = 'system') {
+    const alert = this.alerts.get(id);
+    if (alert) {
+      alert.acknowledged = true;
+      alert.acknowledgedAt = Date.now();
+      alert.acknowledgedBy = by;
+      return true;
+    }
+    return false;
+  }
+
+  acknowledgeAll(by = 'system') {
+    for (const [id, alert] of this.alerts) {
+      alert.acknowledged = true;
+      alert.acknowledgedAt = Date.now();
+      alert.acknowledgedBy = by;
+    }
+    return this.alerts.size;
+  }
+
+  clearAll() {
+    this.alerts.clear();
+  }
+
+  get count() {
+    return this.alerts.size;
+  }
+
+  get activeCount() {
+    return this.getActiveAlerts().length;
+  }
+}
+
+const am = new AlertManager();
+
+// Test with offline observer
+const now = Date.now();
+const offlineObserver = {
+  originId: 'obs1',
+  name: 'Offline Observer',
+  lastSeen: now - 700000, // 11+ minutes ago
+  packetCount: 5,
+  totalSNR: 25, // avg 5 (above -10 threshold)
+  totalRSSI: -250, // avg -50 (above -90 threshold)
+};
+
+const onlineObserver = {
+  originId: 'obs2',
+  name: 'Online Observer',
+  lastSeen: now - 1000, // 1 second ago
+  packetCount: 10,
+  totalSNR: 50, // avg 5 (above -10 threshold)
+  totalRSSI: -400, // avg -40 (above -90 threshold)
+};
+
+am.checkObservers([offlineObserver, onlineObserver]);
+
+const alerts = am.getAlerts();
+assert.strictEqual(alerts.length, 1); // Only offline alert for obs1
+assert.strictEqual(alerts[0].type, 'Offline');
+assert.strictEqual(alerts[0].originId, 'obs1');
+
+// Test acknowledge
+const ackResult = am.acknowledgeAlert(`offline-obs1`, 'test-user');
+assert.strictEqual(ackResult, true);
+assert.strictEqual(am.getActiveAlerts().length, 0);
+
+// Test RSSI alert
+const lowRSSIObserver = {
+  originId: 'obs3',
+  name: 'Low RSSI Observer',
+  lastSeen: now,
+  packetCount: 5,
+  totalSNR: 25, // avg 5
+  totalRSSI: -500, // avg -100 (below -90)
+};
+
+am.checkObservers([lowRSSIObserver]);
+const rssiAlerts = am.getAlerts().filter(a => a.type === 'RSSI');
+assert.strictEqual(rssiAlerts.length, 1);
+assert.strictEqual(rssiAlerts[0].originId, 'obs3');
+
+// Test acknowledge all
+am.acknowledgeAll('admin');
+assert.strictEqual(am.getActiveAlerts().length, 0);
+
+console.log('AlertManager tests passed!');
+
 console.log('\nAll store component tests passed!');
