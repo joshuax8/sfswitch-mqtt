@@ -12,11 +12,11 @@ const defaults = {
   MQTT_NAME: 'sfswitch-mqtt',
   
   // Backend Server
-  BACKEND_PORT: 3000,
+  BACKEND_PORT: 4000,
   BACKEND_HOST: '0.0.0.0',
   
   // WebSocket
-  WS_PORT: 3001,
+  WS_PORT: 4001,
   
   // Data Store
   PACKET_BUFFER_SIZE: 10000,

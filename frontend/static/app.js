@@ -68,7 +68,7 @@ let ws, wsReconnectInterval;
 
 function connectWebSocket() {
     let host = window.location.hostname, protocol = window.location.protocol==='https:'?'wss:':'ws:', port = window.location.port||(protocol==='wss:'?'443':'80');
-    if (window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1') { host='localhost'; port='3000'; protocol='ws:'; }
+    if (window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1') { host='localhost'; port='4000'; protocol='ws:'; }
     const wsUrl = `${protocol}//${host}:${port}/ws`;
     try {
         ws = new WebSocket(wsUrl);
