@@ -42,6 +42,9 @@ const elements = {
     topologyEdgeCount: document.getElementById('topology-edge-count'),
     topologyStatus: document.getElementById('topology-status'),
     topologyCanvas: document.getElementById('topology-canvas'),
+    packetRateChart: document.getElementById('packet-rate-chart'),
+    packetTypesChart: document.getElementById('packet-types-chart'),
+    routeTypesChart: document.getElementById('route-types-chart'),
     topologyNodesTable: document.getElementById('topology-nodes-table'),
     topologyEdgesTable: document.getElementById('topology-edges-table'),
     alertsActiveCount: document.getElementById('alerts-active-count'),
@@ -121,6 +124,7 @@ function renderOverview() {
     if(elements.activeObservers) elements.activeObservers.textContent=formatNumber(state.stats.observerCount);
     if(elements.packetsPerSec) elements.packetsPerSec.textContent=formatNumber(state.stats.windowPackets);
     if(elements.bufferUsage) elements.bufferUsage.textContent=`${formatNumber(state.stats.bufferSize)} / ${formatNumber(state.stats.bufferCapacity)}`;
+    renderPacketRateChart();
 }
 function renderObservers() {
     if(!elements.observersTableBody) return;
@@ -143,6 +147,71 @@ function renderStats() {
     const obsPkts=state.stats.packetsPerObserver||{}, total=state.stats.totalPackets||1;
     const html=Object.entries(obsPkts).map(([id,count])=>{ const o=state.observers.find(x=>x.originId===id); const n=o?truncate(o.name,20):truncate(id,20); const pct=((count/total)*100).toFixed(1); return `<tr><td>${n}</td><td class="font-mono">${formatNumber(count)}</td><td class="font-mono">${pct}%</td></tr>`; }).join('');
     elements.perObserverStats.innerHTML=html||'<tr class="empty-state"><td colspan="3">No data available</td></tr>';
+    renderPacketTypesChart();
+    renderRouteTypesChart();
+}
+function renderPacketRateChart() {
+    if(!elements.packetRateChart) return;
+    const canvas=elements.packetRateChart, ctx=canvas.getContext('2d');
+    const container=canvas.parentElement;
+    if(container) { canvas.width=container.clientWidth; canvas.height=200; }
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const rate=state.stats.windowPackets||0, total=state.stats.totalPackets||0;
+    const barWidth=60, barX=20, maxBarHeight=150;
+    const barHeight=Math.min(rate/10, maxBarHeight);
+    ctx.fillStyle='#3b82f6';
+    ctx.fillRect(barX, canvas.height-barHeight-20, barWidth, barHeight);
+    ctx.fillStyle='#ffffff';
+    ctx.font='12px sans-serif';
+    ctx.textAlign='center';
+    ctx.fillText(formatNumber(rate), barX+barWidth/2, canvas.height-barHeight-30);
+    ctx.fillStyle='#94a3b8';
+    ctx.font='10px sans-serif';
+    ctx.fillText('Packets/sec (window)', barX+barWidth/2, canvas.height-5);
+}
+function renderPacketTypesChart() {
+    if(!elements.packetTypesChart) return;
+    const canvas=elements.packetTypesChart, ctx=canvas.getContext('2d');
+    const container=canvas.parentElement;
+    const pTypes=state.stats.packetTypes||{};
+    if(container) { canvas.width=container.clientWidth; canvas.height=200; }
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(Object.keys(pTypes).length===0) { ctx.fillStyle='#64748b'; ctx.font='14px sans-serif'; ctx.textAlign='center'; ctx.fillText('No packet type data', canvas.width/2, canvas.height/2); return; }
+    const total=Object.values(pTypes).reduce((a,b)=>a+b,0);
+    const colors=['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316'];
+    const labels=Object.entries(PACKET_TYPES).filter(([k])=>pTypes[k]!=null);
+    const barWidth=canvas.width/labels.length/2, gap=20;
+    let x=40;
+    labels.forEach(([k,label],i)=>{ const count=pTypes[k]||0, pct=(count/total*100).toFixed(1), barHeight=(count/total)*150;
+        ctx.fillStyle=colors[i%colors.length];
+        ctx.fillRect(x, canvas.height-barHeight-20, barWidth, barHeight);
+        ctx.fillStyle='#ffffff'; ctx.font='10px sans-serif'; ctx.textAlign='center';
+        ctx.fillText(formatNumber(count), x+barWidth/2, canvas.height-barHeight-25);
+        ctx.fillText(pct+'%', x+barWidth/2, canvas.height-barHeight-10);
+        ctx.fillText(label, x+barWidth/2, canvas.height-5);
+        x+=barWidth+gap; });
+}
+function renderRouteTypesChart() {
+    if(!elements.routeTypesChart) return;
+    const canvas=elements.routeTypesChart, ctx=canvas.getContext('2d');
+    const container=canvas.parentElement;
+    const rTypes=state.stats.routeTypes||{};
+    if(container) { canvas.width=container.clientWidth; canvas.height=200; }
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(Object.keys(rTypes).length===0) { ctx.fillStyle='#64748b'; ctx.font='14px sans-serif'; ctx.textAlign='center'; ctx.fillText('No route type data', canvas.width/2, canvas.height/2); return; }
+    const total=Object.values(rTypes).reduce((a,b)=>a+b,0);
+    const colors=['#3b82f6','#10b981'];
+    const entries=Object.entries(rTypes).filter(([k])=>k in ROUTE_TYPES);
+    const barWidth=canvas.width/entries.length/2, gap=20;
+    let x=40;
+    entries.forEach(([k,count],i)=>{ const label=ROUTE_TYPES[k]||k, pct=(count/total*100).toFixed(1), barHeight=(count/total)*150;
+        ctx.fillStyle=colors[i%colors.length];
+        ctx.fillRect(x, canvas.height-barHeight-20, barWidth, barHeight);
+        ctx.fillStyle='#ffffff'; ctx.font='10px sans-serif'; ctx.textAlign='center';
+        ctx.fillText(formatNumber(count), x+barWidth/2, canvas.height-barHeight-25);
+        ctx.fillText(pct+'%', x+barWidth/2, canvas.height-barHeight-10);
+        ctx.fillText(label, x+barWidth/2, canvas.height-5);
+        x+=barWidth+gap; });
 }
 function renderTopology() {
     if(elements.topologyNodeCount) elements.topologyNodeCount.textContent=formatNumber(state.topology.nodes?.length||0);
@@ -198,14 +267,14 @@ function renderAlertsTable() {
 
 function initEventHandlers() {
     elements.navLinks.forEach(link=>{ link.addEventListener('click',(e)=>{ e.preventDefault(); const v=link.dataset.view; state.currentView=v; elements.navLinks.forEach(l=>l.classList.remove('active')); link.classList.add('active'); elements.views.forEach(vv=>vv.classList.remove('active')); document.getElementById(v)?.classList.add('active'); updateUI(); document.querySelector('.main').scrollTop=0; }); });
-    elements.statsTabs.forEach(tab=>{ tab.addEventListener('click',()=>{ const tid=tab.dataset.tab; elements.statsTabs.forEach(t=>t.classList.remove('active')); tab.classList.add('active'); elements.statsContents.forEach(c=>c.classList.remove('active')); document.getElementById(`stats-${tid}`)?.classList.add('active'); }); });
+    elements.statsTabs.forEach(tab=>{ tab.addEventListener('click',()=>{ const tid=tab.dataset.tab; elements.statsTabs.forEach(t=>t.classList.remove('active')); tab.classList.add('active'); elements.statsContents.forEach(c=>c.classList.remove('active')); document.getElementById(`stats-${tid}`)?.classList.add('active'); if(state.currentView==='stats') { if(tid==='types') renderPacketTypesChart(); if(tid==='routes') renderRouteTypesChart(); } }); });
     if(elements.observerFilter) elements.observerFilter.addEventListener('input',()=>{ if(state.currentView==='observers') renderObservers(); });
     if(elements.observerSort) elements.observerSort.addEventListener('change',()=>{ if(state.currentView==='observers') renderObservers(); });
     if(elements.refreshPackets) elements.refreshPackets.addEventListener('click',()=>{ const l=parseInt(elements.packetLimit?.value)||100; fetchPackets(l); });
     if(elements.packetLimit) elements.packetLimit.addEventListener('change',()=>{ if(state.currentView==='packets') renderPackets(); });
     if(elements.acknowledgeAllAlerts) elements.acknowledgeAllAlerts.addEventListener('click',async()=>{ await acknowledgeAllAlerts('web'); });
     if(elements.refreshAlerts) elements.refreshAlerts.addEventListener('click',()=>{ fetchAlerts(); });
-    window.addEventListener('resize',()=>{ if(state.currentView==='topology') renderTopologyCanvas(); });
+    window.addEventListener('resize',()=>{ if(state.currentView==='topology') renderTopologyCanvas(); if(state.currentView==='overview') renderPacketRateChart(); if(state.currentView==='stats') { renderPacketTypesChart(); renderRouteTypesChart(); } });
     setInterval(()=>{ if(!state.wsConnected) { fetchHealth(); fetchStats(); fetchObservers(); fetchTopology(); fetchAlerts(); } },5000);
 }
 
