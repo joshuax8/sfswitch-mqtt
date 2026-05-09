@@ -54,8 +54,21 @@
                         <div class="stat-value" id="buffer-usage">0 / 0</div>
                     </div>
                 </div>
-                <div class="chart-container">
-                    <canvas id="packet-rate-chart"></canvas>
+                <div class="chart-row">
+                    <div class="chart-container time-series">
+                        <h3>Packets/sec</h3>
+                        <canvas id="timeseries-packets-chart"></canvas>
+                    </div>
+                    <div class="chart-container time-series">
+                        <h3>Observers</h3>
+                        <canvas id="timeseries-observers-chart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-row">
+                    <div class="chart-container time-series">
+                        <h3>Buffer Usage</h3>
+                        <canvas id="timeseries-buffer-chart"></canvas>
+                    </div>
                 </div>
             </section>
 

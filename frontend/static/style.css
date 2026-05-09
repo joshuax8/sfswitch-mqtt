@@ -365,6 +365,37 @@ body {
     height: 100% !important;
 }
 
+/* Time series charts */
+.chart-row {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+}
+
+.chart-row .chart-container {
+    flex: 1;
+    min-width: 400px;
+    height: 280px;
+}
+
+.chart-row .chart-container h3 {
+    margin: 0 0 0.5rem 0;
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.chart-container.time-series {
+    height: 280px;
+}
+
+.time-series canvas {
+    width: 100% !important;
+    height: 220px !important;
+}
+
 /* Footer */
 .footer {
     background-color: var(--color-surface);

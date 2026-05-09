@@ -17,7 +17,14 @@ const state = {
     currentView: 'overview',
     packetLimit: 100,
     lastUpdate: null,
-    charts: { packetRate: null, packetTypes: null, routeTypes: null },
+    charts: { packetRate: null, packetTypes: null, routeTypes: null, 
+              timeseriesPackets: null, timeseriesObservers: null, timeseriesBuffer: null },
+    history: {
+        packets: [],  // { t: timestamp, y: packets/sec }
+        observers: [], // { t: timestamp, y: count }
+        buffer: [],    // { t: timestamp, y: usage }
+    },
+    historyMaxPoints: 60,
 };
 
 const elements = {
@@ -46,6 +53,9 @@ const elements = {
     packetRateChart: document.getElementById('packet-rate-chart'),
     packetTypesChart: document.getElementById('packet-types-chart'),
     routeTypesChart: document.getElementById('route-types-chart'),
+    timeseriesPacketsChart: document.getElementById('timeseries-packets-chart'),
+    timeseriesObserversChart: document.getElementById('timeseries-observers-chart'),
+    timeseriesBufferChart: document.getElementById('timeseries-buffer-chart'),
     topologyNodesTable: document.getElementById('topology-nodes-table'),
     topologyEdgesTable: document.getElementById('topology-edges-table'),
     alertsActiveCount: document.getElementById('alerts-active-count'),
@@ -68,6 +78,18 @@ function getStatusBadge(s) { return `<span class="status-badge ${s}">${s}</span>
 function getSeverityBadge(s) { const c = getSeverityClass(s); return `<span class="severity-badge ${c}">${s||'info'}</span>`; }
 function getSeverityClass(s) { switch((s||'').toLowerCase()) { case 'critical': return 'critical'; case 'warning': return 'warning'; default: return 'info'; } }
 
+function addHistoryPoint(series, value) {
+    const now = Date.now();
+    // Add new point
+    series.push({ t: now, y: value });
+    // Trim old points if over max
+    while(series.length > state.historyMaxPoints) series.shift();
+}
+
+function getTimeLabels(series) {
+    return series.map(p => new Date(p.t).toLocaleTimeString());
+}
+
 let ws, wsReconnectInterval;
 
 function connectWebSocket() {
@@ -85,8 +107,14 @@ function connectWebSocket() {
 function startReconnect() { clearInterval(wsReconnectInterval); wsReconnectInterval=setInterval(()=>{if(!state.wsConnected) connectWebSocket();},5000); }
 function handleWS(data) {
     switch(data.type) {
-        case 'init': state.stats=data.stats; state.observers=data.observers; break;
-        case 'stats': state.stats=data.data; break;
+        case 'init': state.stats=data.stats; state.observers=data.observers; 
+                      addHistoryPoint(state.history.packets, data.stats?.windowPackets||0);
+                      addHistoryPoint(state.history.observers, data.stats?.observerCount||0);
+                      addHistoryPoint(state.history.buffer, data.stats?.bufferSize||0); break;
+        case 'stats': state.stats=data.data; 
+                      addHistoryPoint(state.history.packets, data.data?.windowPackets||0);
+                      addHistoryPoint(state.history.observers, data.data?.observerCount||0);
+                      addHistoryPoint(state.history.buffer, data.data?.bufferSize||0); break;
         case 'packets': state.packets=data.data; break;
         case 'observers': state.observers=data.data; break;
         case 'topology': state.topology={enabled:true,...data.data}; break;
@@ -96,7 +124,15 @@ function handleWS(data) {
 }
 
 async function fetchHealth() { try { const r=await fetch('/health'), d=await r.json(); state.mqttConnected=d.mqtt?.connected||false; state.stats.bufferSize=d.backend?.packetsStored||0; state.stats.bufferCapacity=d.backend?.bufferCapacity||0; updateStatusUI(); updateUI(); } catch(e){console.error('Fetch health:',e);} }
-async function fetchStats() { try { const r=await fetch('/api/stats'), d=await r.json(); state.stats=d; state.lastUpdate=new Date(); updateUI(); } catch(e){console.error('Fetch stats:',e);} }
+async function fetchStats() { 
+    try { const r=await fetch('/api/stats'), d=await r.json(); 
+        state.stats=d; 
+        addHistoryPoint(state.history.packets, d?.windowPackets||0);
+        addHistoryPoint(state.history.observers, d?.observerCount||0);
+        addHistoryPoint(state.history.buffer, d?.bufferSize||0);
+        state.lastUpdate=new Date(); updateUI(); 
+    } catch(e){console.error('Fetch stats:',e);} 
+}
 async function fetchObservers() { try { const r=await fetch('/api/observers'), d=await r.json(); state.observers=d; state.lastUpdate=new Date(); updateUI(); } catch(e){console.error('Fetch observers:',e);} }
 async function fetchPackets(limit=100) { try { const r=await fetch(`/api/packets?limit=${limit}`), d=await r.json(); state.packets=d; state.lastUpdate=new Date(); updateUI(); } catch(e){console.error('Fetch packets:',e);} }
 async function fetchTopology() { try { const r=await fetch('/api/topology'), d=await r.json(); state.topology={enabled:!d.error,...d}; state.lastUpdate=new Date(); updateUI(); } catch(e){console.error('Fetch topology:',e); state.topology.enabled=false;} }
@@ -125,7 +161,9 @@ function renderOverview() {
     if(elements.activeObservers) elements.activeObservers.textContent=formatNumber(state.stats.observerCount);
     if(elements.packetsPerSec) elements.packetsPerSec.textContent=formatNumber(state.stats.windowPackets);
     if(elements.bufferUsage) elements.bufferUsage.textContent=`${formatNumber(state.stats.bufferSize)} / ${formatNumber(state.stats.bufferCapacity)}`;
-    renderPacketRateChart();
+    renderTimeseriesPacketsChart();
+    renderTimeseriesObserversChart();
+    renderTimeseriesBufferChart();
 }
 function renderObservers() {
     if(!elements.observersTableBody) return;
@@ -255,6 +293,131 @@ function renderRouteTypesChart() {
         state.charts.routeTypes.data.datasets[0].data=data;
         state.charts.routeTypes.data.datasets[0].backgroundColor=colors;
         state.charts.routeTypes.update('none');
+    }
+}
+function renderTimeseriesPacketsChart() {
+    if(!elements.timeseriesPacketsChart) return;
+    const container=elements.timeseriesPacketsChart.parentElement;
+    if(!container) return;
+    if(state.history.packets.length===0) return;
+    if(!state.charts.timeseriesPackets) {
+        state.charts.timeseriesPackets=new Chart(elements.timeseriesPacketsChart, {
+            type: 'line',
+            data: {
+                labels: getTimeLabels(state.history.packets),
+                datasets: [{
+                    label: 'Packets/sec',
+                    data: state.history.packets.map(p=>p.y),
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59,130,246,0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    borderWidth: 2,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: (c)=>formatNumber(c.parsed.y) } }
+                },
+                scales: {
+                    y: { beginAtZero: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                    x: { ticks: { color: '#94a3b8', maxRotation: 45, minRotation: 45 }, grid: { display: false } }
+                }
+            }
+        });
+    } else {
+        state.charts.timeseriesPackets.data.labels=getTimeLabels(state.history.packets);
+        state.charts.timeseriesPackets.data.datasets[0].data=state.history.packets.map(p=>p.y);
+        state.charts.timeseriesPackets.update('none');
+    }
+}
+function renderTimeseriesObserversChart() {
+    if(!elements.timeseriesObserversChart) return;
+    const container=elements.timeseriesObserversChart.parentElement;
+    if(!container) return;
+    if(state.history.observers.length===0) return;
+    if(!state.charts.timeseriesObservers) {
+        state.charts.timeseriesObservers=new Chart(elements.timeseriesObserversChart, {
+            type: 'line',
+            data: {
+                labels: getTimeLabels(state.history.observers),
+                datasets: [{
+                    label: 'Active Observers',
+                    data: state.history.observers.map(p=>p.y),
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16,185,129,0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    borderWidth: 2,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: (c)=>formatNumber(c.parsed.y) } }
+                },
+                scales: {
+                    y: { beginAtZero: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                    x: { ticks: { color: '#94a3b8', maxRotation: 45, minRotation: 45 }, grid: { display: false } }
+                }
+            }
+        });
+    } else {
+        state.charts.timeseriesObservers.data.labels=getTimeLabels(state.history.observers);
+        state.charts.timeseriesObservers.data.datasets[0].data=state.history.observers.map(p=>p.y);
+        state.charts.timeseriesObservers.update('none');
+    }
+}
+function renderTimeseriesBufferChart() {
+    if(!elements.timeseriesBufferChart) return;
+    const container=elements.timeseriesBufferChart.parentElement;
+    if(!container) return;
+    if(state.history.buffer.length===0) return;
+    const capacity=state.stats.bufferCapacity||10000;
+    if(!state.charts.timeseriesBuffer) {
+        state.charts.timeseriesBuffer=new Chart(elements.timeseriesBufferChart, {
+            type: 'line',
+            data: {
+                labels: getTimeLabels(state.history.buffer),
+                datasets: [{
+                    label: 'Buffer Usage',
+                    data: state.history.buffer.map(p=>p.y),
+                    borderColor: '#f59e0b',
+                    backgroundColor: 'rgba(245,158,11,0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    borderWidth: 2,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: (c)=>formatNumber(c.parsed.y)+' / '+formatNumber(capacity) } }
+                },
+                scales: {
+                    y: { beginAtZero: true, max: capacity*1.1, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                    x: { ticks: { color: '#94a3b8', maxRotation: 45, minRotation: 45 }, grid: { display: false } }
+                }
+            }
+        });
+    } else {
+        state.charts.timeseriesBuffer.data.labels=getTimeLabels(state.history.buffer);
+        state.charts.timeseriesBuffer.data.datasets[0].data=state.history.buffer.map(p=>p.y);
+        state.charts.timeseriesBuffer.options.scales.y.max=capacity*1.1;
+        state.charts.timeseriesBuffer.update('none');
     }
 }
 function renderTopology() {
