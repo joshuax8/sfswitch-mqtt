@@ -156,102 +156,106 @@ function renderPacketRateChart() {
     const rate=state.stats.windowPackets||0;
     const container=elements.packetRateChart.parentElement;
     if(!container) return;
-    const height=200;
-    container.style.height=`${height}px`;
-    if(state.charts.packetRate) state.charts.packetRate.destroy();
-    state.charts.packetRate=new Chart(elements.packetRateChart, {
-        type: 'bar',
-        data: {
-            labels: ['Packets/sec'], 
-            datasets: [{
-                label: 'Window Rate',
-                data: [rate],
-                backgroundColor: '#3b82f6',
-                borderColor: '#2563eb',
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: { callbacks: { label: (c)=>formatNumber(c.parsed.y) } }
+    container.style.height='200px';
+    if(!state.charts.packetRate) {
+        state.charts.packetRate=new Chart(elements.packetRateChart, {
+            type: 'bar',
+            data: {
+                labels: ['Packets/sec'], 
+                datasets: [{
+                    label: 'Window Rate',
+                    data: [rate],
+                    backgroundColor: '#3b82f6',
+                    borderColor: '#2563eb',
+                    borderWidth: 1
+                }]
             },
-            scales: { y: { beginAtZero: true, ticks: { color: '#94a3b8' } }, x: { ticks: { color: '#94a3b8' } } }
-        }
-    });
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: (c)=>formatNumber(c.parsed.y) } }
+                },
+                scales: { y: { beginAtZero: true, ticks: { color: '#94a3b8' } }, x: { ticks: { color: '#94a3b8' } } }
+            }
+        });
+    } else {
+        state.charts.packetRate.data.datasets[0].data=[rate];
+        state.charts.packetRate.update('none');
+    }
 }
 function renderPacketTypesChart() {
     if(!elements.packetTypesChart) return;
     const pTypes=state.stats.packetTypes||{};
     const container=elements.packetTypesChart.parentElement;
     if(!container) return;
-    const height=200;
-    container.style.height=`${height}px`;
-    if(state.charts.packetTypes) state.charts.packetTypes.destroy();
+    container.style.height='200px';
     const labels=[], data=[], colors=[];
     const chartColors=['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316'];
     Object.entries(PACKET_TYPES).forEach(([k,label],i)=>{ 
         if(pTypes[k]!=null) { labels.push(label); data.push(pTypes[k]); colors.push(chartColors[i%chartColors.length]); }
     });
     if(labels.length===0) return;
-    state.charts.packetTypes=new Chart(elements.packetTypesChart, {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Count',
-                data: data,
-                backgroundColor: colors,
-                borderColor: colors.map(c=>c.replace('82','99')),
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: { callbacks: { label: (c)=>PACKET_TYPES[c.label]||c.label+': '+formatNumber(c.parsed.y) } }
-            },
-            scales: { y: { beginAtZero: true, ticks: { color: '#94a3b8' } }, x: { ticks: { color: '#94a3b8', maxRotation: 45, minRotation: 45 } } }
-        }
-    });
+    if(!state.charts.packetTypes) {
+        state.charts.packetTypes=new Chart(elements.packetTypesChart, {
+            type: 'bar',
+            data: { labels: labels, datasets: [{ label: 'Count', data: data, backgroundColor: colors, borderColor: colors.map(c=>c.replace('82','99')), borderWidth: 1 }] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c)=>PACKET_TYPES[c.label]||c.label+': '+formatNumber(c.parsed.y) } } },
+                scales: { y: { beginAtZero: true, ticks: { color: '#94a3b8' } }, x: { ticks: { color: '#94a3b8', maxRotation: 45, minRotation: 45 } } }
+            }
+        });
+    } else {
+        state.charts.packetTypes.data.labels=labels;
+        state.charts.packetTypes.data.datasets[0].data=data;
+        state.charts.packetTypes.data.datasets[0].backgroundColor=colors;
+        state.charts.packetTypes.update('none');
+    }
 }
 function renderRouteTypesChart() {
     if(!elements.routeTypesChart) return;
     const rTypes=state.stats.routeTypes||{};
     const container=elements.routeTypesChart.parentElement;
     if(!container) return;
-    const height=200;
-    container.style.height=`${height}px`;
-    if(state.charts.routeTypes) state.charts.routeTypes.destroy();
+    container.style.height='200px';
     const labels=[], data=[], colors=[];
     Object.entries(rTypes).forEach(([k,count])=>{
         if(k in ROUTE_TYPES) { labels.push(ROUTE_TYPES[k]); data.push(count); colors.push(k==='F'?'#3b82f6':'#10b981'); }
     });
     if(labels.length===0) return;
-    state.charts.routeTypes=new Chart(elements.routeTypesChart, {
-        type: 'doughnut',
-        data: {
-            labels: labels,
-            datasets: [{
-                data: data,
-                backgroundColor: colors,
-                borderColor: '#ffffff',
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { position: 'bottom', labels: { color: '#ffffff' } },
-                tooltip: { callbacks: { label: (c)=>{ const total=data.reduce((a,b)=>a+b,0); const pct=(c.parsed/total*100).toFixed(1); return c.label+': '+formatNumber(c.parsed)+' ('+pct+'%)'; } } }
+    if(!state.charts.routeTypes) {
+        state.charts.routeTypes=new Chart(elements.routeTypesChart, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    backgroundColor: colors,
+                    borderColor: '#ffffff',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                plugins: {
+                    legend: { position: 'bottom', labels: { color: '#ffffff' } },
+                    tooltip: { callbacks: { label: (c)=>{ const total=data.reduce((a,b)=>a+b,0); const pct=(c.parsed/total*100).toFixed(1); return c.label+': '+formatNumber(c.parsed)+' ('+pct+'%)'; } } }
+                }
             }
-        }
-    });
+        });
+    } else {
+        state.charts.routeTypes.data.labels=labels;
+        state.charts.routeTypes.data.datasets[0].data=data;
+        state.charts.routeTypes.data.datasets[0].backgroundColor=colors;
+        state.charts.routeTypes.update('none');
+    }
 }
 function renderTopology() {
     if(elements.topologyNodeCount) elements.topologyNodeCount.textContent=formatNumber(state.topology.nodes?.length||0);
@@ -314,7 +318,7 @@ function initEventHandlers() {
     if(elements.packetLimit) elements.packetLimit.addEventListener('change',()=>{ if(state.currentView==='packets') renderPackets(); });
     if(elements.acknowledgeAllAlerts) elements.acknowledgeAllAlerts.addEventListener('click',async()=>{ await acknowledgeAllAlerts('web'); });
     if(elements.refreshAlerts) elements.refreshAlerts.addEventListener('click',()=>{ fetchAlerts(); });
-    window.addEventListener('resize',()=>{ if(state.currentView==='topology') renderTopologyCanvas(); if(state.currentView==='overview') renderPacketRateChart(); if(state.currentView==='stats') { renderPacketTypesChart(); renderRouteTypesChart(); } });
+    window.addEventListener('resize',()=>{ if(state.currentView==='topology') renderTopologyCanvas(); });
     setInterval(()=>{ if(!state.wsConnected) { fetchHealth(); fetchStats(); fetchObservers(); fetchTopology(); fetchAlerts(); } },5000);
 }
 
