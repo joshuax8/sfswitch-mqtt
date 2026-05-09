@@ -20,9 +20,10 @@ const state = {
     charts: { packetRate: null, packetTypes: null, routeTypes: null, 
               timeseriesPackets: null, timeseriesObservers: null, timeseriesBuffer: null },
     history: {
-        packets: [],  // { t: timestamp, y: packets/sec }
-        observers: [], // { t: timestamp, y: count }
-        buffer: [],    // { t: timestamp, y: usage }
+        startTime: null, // First buffer timestamp
+        packets: [],  // { t: relativeSeconds, y: packets/sec }
+        observers: [], // { t: relativeSeconds, y: count }
+        buffer: [],    // { t: relativeSeconds, y: usage }
     },
     historyMaxPoints: 60,
 };
@@ -78,16 +79,20 @@ function getStatusBadge(s) { return `<span class="status-badge ${s}">${s}</span>
 function getSeverityBadge(s) { const c = getSeverityClass(s); return `<span class="severity-badge ${c}">${s||'info'}</span>`; }
 function getSeverityClass(s) { switch((s||'').toLowerCase()) { case 'critical': return 'critical'; case 'warning': return 'warning'; default: return 'info'; } }
 
-function addHistoryPoint(series, value) {
-    const now = Date.now();
-    // Add new point
-    series.push({ t: now, y: value });
-    // Trim old points if over max
-    while(series.length > state.historyMaxPoints) series.shift();
+function getRelativeTime(ts) {
+    if(state.history.startTime === null) {
+        state.history.startTime = ts;
+        return 0;
+    }
+    return Math.floor((ts - state.history.startTime) / 1000);
 }
 
-function getTimeLabels(series) {
-    return series.map(p => new Date(p.t).toLocaleTimeString());
+function addHistoryPoint(series, value, ts) {
+    const timestamp = ts || Date.now();
+    const relativeT = getRelativeTime(timestamp);
+    series.push({ t: relativeT, y: value });
+    // Trim old points if over max
+    while(series.length > state.historyMaxPoints) series.shift();
 }
 
 let ws, wsReconnectInterval;
@@ -108,13 +113,14 @@ function startReconnect() { clearInterval(wsReconnectInterval); wsReconnectInter
 function handleWS(data) {
     switch(data.type) {
         case 'init': state.stats=data.stats; state.observers=data.observers; 
+                      // Record buffer first to set startTime
+                      addHistoryPoint(state.history.buffer, data.stats?.bufferSize||0);
                       addHistoryPoint(state.history.packets, data.stats?.windowPackets||0);
-                      addHistoryPoint(state.history.observers, data.stats?.observerCount||0);
-                      addHistoryPoint(state.history.buffer, data.stats?.bufferSize||0); break;
+                      addHistoryPoint(state.history.observers, data.stats?.observerCount||0); break;
         case 'stats': state.stats=data.data; 
+                      addHistoryPoint(state.history.buffer, data.data?.bufferSize||0);
                       addHistoryPoint(state.history.packets, data.data?.windowPackets||0);
-                      addHistoryPoint(state.history.observers, data.data?.observerCount||0);
-                      addHistoryPoint(state.history.buffer, data.data?.bufferSize||0); break;
+                      addHistoryPoint(state.history.observers, data.data?.observerCount||0); break;
         case 'packets': state.packets=data.data; break;
         case 'observers': state.observers=data.data; break;
         case 'topology': state.topology={enabled:true,...data.data}; break;
@@ -127,9 +133,10 @@ async function fetchHealth() { try { const r=await fetch('/health'), d=await r.j
 async function fetchStats() { 
     try { const r=await fetch('/api/stats'), d=await r.json(); 
         state.stats=d; 
+        // Record buffer first to set startTime
+        addHistoryPoint(state.history.buffer, d?.bufferSize||0);
         addHistoryPoint(state.history.packets, d?.windowPackets||0);
         addHistoryPoint(state.history.observers, d?.observerCount||0);
-        addHistoryPoint(state.history.buffer, d?.bufferSize||0);
         state.lastUpdate=new Date(); updateUI(); 
     } catch(e){console.error('Fetch stats:',e);} 
 }
@@ -300,14 +307,14 @@ function renderTimeseriesPacketsChart() {
     const container=elements.timeseriesPacketsChart.parentElement;
     if(!container) return;
     if(state.history.packets.length===0) return;
+    const data = state.history.packets.map(p=>({x: p.t, y: p.y}));
     if(!state.charts.timeseriesPackets) {
         state.charts.timeseriesPackets=new Chart(elements.timeseriesPacketsChart, {
             type: 'line',
             data: {
-                labels: getTimeLabels(state.history.packets),
                 datasets: [{
                     label: 'Packets/sec',
-                    data: state.history.packets.map(p=>p.y),
+                    data: data,
                     borderColor: '#3b82f6',
                     backgroundColor: 'rgba(59,130,246,0.1)',
                     fill: true,
@@ -326,13 +333,17 @@ function renderTimeseriesPacketsChart() {
                 },
                 scales: {
                     y: { beginAtZero: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
-                    x: { ticks: { color: '#94a3b8', maxRotation: 45, minRotation: 45 }, grid: { display: false } }
+                    x: { 
+                        type: 'linear',
+                        title: { display: true, text: 'Time (seconds)', color: '#94a3b8' },
+                        ticks: { color: '#94a3b8', callback: (v)=>v+'s' },
+                        grid: { display: false }
+                    }
                 }
             }
         });
     } else {
-        state.charts.timeseriesPackets.data.labels=getTimeLabels(state.history.packets);
-        state.charts.timeseriesPackets.data.datasets[0].data=state.history.packets.map(p=>p.y);
+        state.charts.timeseriesPackets.data.datasets[0].data=data;
         state.charts.timeseriesPackets.update('none');
     }
 }
@@ -341,14 +352,14 @@ function renderTimeseriesObserversChart() {
     const container=elements.timeseriesObserversChart.parentElement;
     if(!container) return;
     if(state.history.observers.length===0) return;
+    const data = state.history.observers.map(p=>({x: p.t, y: p.y}));
     if(!state.charts.timeseriesObservers) {
         state.charts.timeseriesObservers=new Chart(elements.timeseriesObserversChart, {
             type: 'line',
             data: {
-                labels: getTimeLabels(state.history.observers),
                 datasets: [{
                     label: 'Active Observers',
-                    data: state.history.observers.map(p=>p.y),
+                    data: data,
                     borderColor: '#10b981',
                     backgroundColor: 'rgba(16,185,129,0.1)',
                     fill: true,
@@ -367,13 +378,17 @@ function renderTimeseriesObserversChart() {
                 },
                 scales: {
                     y: { beginAtZero: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
-                    x: { ticks: { color: '#94a3b8', maxRotation: 45, minRotation: 45 }, grid: { display: false } }
+                    x: { 
+                        type: 'linear',
+                        title: { display: true, text: 'Time (seconds)', color: '#94a3b8' },
+                        ticks: { color: '#94a3b8', callback: (v)=>v+'s' },
+                        grid: { display: false }
+                    }
                 }
             }
         });
     } else {
-        state.charts.timeseriesObservers.data.labels=getTimeLabels(state.history.observers);
-        state.charts.timeseriesObservers.data.datasets[0].data=state.history.observers.map(p=>p.y);
+        state.charts.timeseriesObservers.data.datasets[0].data=data;
         state.charts.timeseriesObservers.update('none');
     }
 }
@@ -383,14 +398,14 @@ function renderTimeseriesBufferChart() {
     if(!container) return;
     if(state.history.buffer.length===0) return;
     const capacity=state.stats.bufferCapacity||10000;
+    const data = state.history.buffer.map(p=>({x: p.t, y: p.y}));
     if(!state.charts.timeseriesBuffer) {
         state.charts.timeseriesBuffer=new Chart(elements.timeseriesBufferChart, {
             type: 'line',
             data: {
-                labels: getTimeLabels(state.history.buffer),
                 datasets: [{
                     label: 'Buffer Usage',
-                    data: state.history.buffer.map(p=>p.y),
+                    data: data,
                     borderColor: '#f59e0b',
                     backgroundColor: 'rgba(245,158,11,0.1)',
                     fill: true,
@@ -409,13 +424,17 @@ function renderTimeseriesBufferChart() {
                 },
                 scales: {
                     y: { beginAtZero: true, max: capacity*1.1, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
-                    x: { ticks: { color: '#94a3b8', maxRotation: 45, minRotation: 45 }, grid: { display: false } }
+                    x: { 
+                        type: 'linear',
+                        title: { display: true, text: 'Time (seconds)', color: '#94a3b8' },
+                        ticks: { color: '#94a3b8', callback: (v)=>v+'s' },
+                        grid: { display: false }
+                    }
                 }
             }
         });
     } else {
-        state.charts.timeseriesBuffer.data.labels=getTimeLabels(state.history.buffer);
-        state.charts.timeseriesBuffer.data.datasets[0].data=state.history.buffer.map(p=>p.y);
+        state.charts.timeseriesBuffer.data.datasets[0].data=data;
         state.charts.timeseriesBuffer.options.scales.y.max=capacity*1.1;
         state.charts.timeseriesBuffer.update('none');
     }
