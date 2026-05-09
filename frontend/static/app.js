@@ -17,6 +17,7 @@ const state = {
     currentView: 'overview',
     packetLimit: 100,
     lastUpdate: null,
+    charts: { packetRate: null, packetTypes: null, routeTypes: null },
 };
 
 const elements = {
@@ -152,66 +153,105 @@ function renderStats() {
 }
 function renderPacketRateChart() {
     if(!elements.packetRateChart) return;
-    const canvas=elements.packetRateChart, ctx=canvas.getContext('2d');
-    const container=canvas.parentElement;
-    if(container) { canvas.width=container.clientWidth; canvas.height=200; }
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    const rate=state.stats.windowPackets||0, total=state.stats.totalPackets||0;
-    const barWidth=60, barX=20, maxBarHeight=150;
-    const barHeight=Math.min(rate/10, maxBarHeight);
-    ctx.fillStyle='#3b82f6';
-    ctx.fillRect(barX, canvas.height-barHeight-20, barWidth, barHeight);
-    ctx.fillStyle='#ffffff';
-    ctx.font='12px sans-serif';
-    ctx.textAlign='center';
-    ctx.fillText(formatNumber(rate), barX+barWidth/2, canvas.height-barHeight-30);
-    ctx.fillStyle='#94a3b8';
-    ctx.font='10px sans-serif';
-    ctx.fillText('Packets/sec (window)', barX+barWidth/2, canvas.height-5);
+    const rate=state.stats.windowPackets||0;
+    const container=elements.packetRateChart.parentElement;
+    if(!container) return;
+    const height=200;
+    container.style.height=`${height}px`;
+    if(state.charts.packetRate) state.charts.packetRate.destroy();
+    state.charts.packetRate=new Chart(elements.packetRateChart, {
+        type: 'bar',
+        data: {
+            labels: ['Packets/sec'], 
+            datasets: [{
+                label: 'Window Rate',
+                data: [rate],
+                backgroundColor: '#3b82f6',
+                borderColor: '#2563eb',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: (c)=>formatNumber(c.parsed.y) } }
+            },
+            scales: { y: { beginAtZero: true, ticks: { color: '#94a3b8' } }, x: { ticks: { color: '#94a3b8' } } }
+        }
+    });
 }
 function renderPacketTypesChart() {
     if(!elements.packetTypesChart) return;
-    const canvas=elements.packetTypesChart, ctx=canvas.getContext('2d');
-    const container=canvas.parentElement;
     const pTypes=state.stats.packetTypes||{};
-    if(container) { canvas.width=container.clientWidth; canvas.height=200; }
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    if(Object.keys(pTypes).length===0) { ctx.fillStyle='#64748b'; ctx.font='14px sans-serif'; ctx.textAlign='center'; ctx.fillText('No packet type data', canvas.width/2, canvas.height/2); return; }
-    const total=Object.values(pTypes).reduce((a,b)=>a+b,0);
-    const colors=['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316'];
-    const labels=Object.entries(PACKET_TYPES).filter(([k])=>pTypes[k]!=null);
-    const barWidth=canvas.width/labels.length/2, gap=20;
-    let x=40;
-    labels.forEach(([k,label],i)=>{ const count=pTypes[k]||0, pct=(count/total*100).toFixed(1), barHeight=(count/total)*150;
-        ctx.fillStyle=colors[i%colors.length];
-        ctx.fillRect(x, canvas.height-barHeight-20, barWidth, barHeight);
-        ctx.fillStyle='#ffffff'; ctx.font='10px sans-serif'; ctx.textAlign='center';
-        ctx.fillText(formatNumber(count), x+barWidth/2, canvas.height-barHeight-25);
-        ctx.fillText(pct+'%', x+barWidth/2, canvas.height-barHeight-10);
-        ctx.fillText(label, x+barWidth/2, canvas.height-5);
-        x+=barWidth+gap; });
+    const container=elements.packetTypesChart.parentElement;
+    if(!container) return;
+    const height=200;
+    container.style.height=`${height}px`;
+    if(state.charts.packetTypes) state.charts.packetTypes.destroy();
+    const labels=[], data=[], colors=[];
+    const chartColors=['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316'];
+    Object.entries(PACKET_TYPES).forEach(([k,label],i)=>{ 
+        if(pTypes[k]!=null) { labels.push(label); data.push(pTypes[k]); colors.push(chartColors[i%chartColors.length]); }
+    });
+    if(labels.length===0) return;
+    state.charts.packetTypes=new Chart(elements.packetTypesChart, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Count',
+                data: data,
+                backgroundColor: colors,
+                borderColor: colors.map(c=>c.replace('82','99')),
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: (c)=>PACKET_TYPES[c.label]||c.label+': '+formatNumber(c.parsed.y) } }
+            },
+            scales: { y: { beginAtZero: true, ticks: { color: '#94a3b8' } }, x: { ticks: { color: '#94a3b8', maxRotation: 45, minRotation: 45 } } }
+        }
+    });
 }
 function renderRouteTypesChart() {
     if(!elements.routeTypesChart) return;
-    const canvas=elements.routeTypesChart, ctx=canvas.getContext('2d');
-    const container=canvas.parentElement;
     const rTypes=state.stats.routeTypes||{};
-    if(container) { canvas.width=container.clientWidth; canvas.height=200; }
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    if(Object.keys(rTypes).length===0) { ctx.fillStyle='#64748b'; ctx.font='14px sans-serif'; ctx.textAlign='center'; ctx.fillText('No route type data', canvas.width/2, canvas.height/2); return; }
-    const total=Object.values(rTypes).reduce((a,b)=>a+b,0);
-    const colors=['#3b82f6','#10b981'];
-    const entries=Object.entries(rTypes).filter(([k])=>k in ROUTE_TYPES);
-    const barWidth=canvas.width/entries.length/2, gap=20;
-    let x=40;
-    entries.forEach(([k,count],i)=>{ const label=ROUTE_TYPES[k]||k, pct=(count/total*100).toFixed(1), barHeight=(count/total)*150;
-        ctx.fillStyle=colors[i%colors.length];
-        ctx.fillRect(x, canvas.height-barHeight-20, barWidth, barHeight);
-        ctx.fillStyle='#ffffff'; ctx.font='10px sans-serif'; ctx.textAlign='center';
-        ctx.fillText(formatNumber(count), x+barWidth/2, canvas.height-barHeight-25);
-        ctx.fillText(pct+'%', x+barWidth/2, canvas.height-barHeight-10);
-        ctx.fillText(label, x+barWidth/2, canvas.height-5);
-        x+=barWidth+gap; });
+    const container=elements.routeTypesChart.parentElement;
+    if(!container) return;
+    const height=200;
+    container.style.height=`${height}px`;
+    if(state.charts.routeTypes) state.charts.routeTypes.destroy();
+    const labels=[], data=[], colors=[];
+    Object.entries(rTypes).forEach(([k,count])=>{
+        if(k in ROUTE_TYPES) { labels.push(ROUTE_TYPES[k]); data.push(count); colors.push(k==='F'?'#3b82f6':'#10b981'); }
+    });
+    if(labels.length===0) return;
+    state.charts.routeTypes=new Chart(elements.routeTypesChart, {
+        type: 'doughnut',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: colors,
+                borderColor: '#ffffff',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { color: '#ffffff' } },
+                tooltip: { callbacks: { label: (c)=>{ const total=data.reduce((a,b)=>a+b,0); const pct=(c.parsed/total*100).toFixed(1); return c.label+': '+formatNumber(c.parsed)+' ('+pct+'%)'; } } }
+            }
+        }
+    });
 }
 function renderTopology() {
     if(elements.topologyNodeCount) elements.topologyNodeCount.textContent=formatNumber(state.topology.nodes?.length||0);
