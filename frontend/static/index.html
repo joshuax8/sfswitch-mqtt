@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeshCore NOC Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <div class="header-content">
+                <h1>MeshCore NOC Dashboard</h1>
+                <div class="header-status" id="mqtt-status">
+                    <span class="status-dot offline"></span>
+                    <span>MQTT: Disconnected</span>
+                </div>
+                <div class="header-status" id="ws-status">
+                    <span class="status-dot offline"></span>
+                    <span>WebSocket: Disconnected</span>
+                </div>
+            </div>
+        </header>
+
+        <nav class="nav">
+            <a href="#overview" class="nav-link active" data-view="overview">Overview</a>
+            <a href="#observers" class="nav-link" data-view="observers">Observers</a>
+            <a href="#packets" class="nav-link" data-view="packets">Packets</a>
+            <a href="#stats" class="nav-link" data-view="stats">Statistics</a>
+        </nav>
+
+        <main class="main">
+            <!-- Overview View -->
+            <section id="overview" class="view active">
+                <h2>Network Overview</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Total Packets</div>
+                        <div class="stat-value" id="total-packets">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Active Observers</div>
+                        <div class="stat-value" id="active-observers">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Packets / Sec</div>
+                        <div class="stat-value" id="packets-per-sec">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Buffer Usage</div>
+                        <div class="stat-value" id="buffer-usage">0 / 0</div>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="packet-rate-chart"></canvas>
+                </div>
+            </section>
+
+            <!-- Observers View -->
+            <section id="observers" class="view">
+                <h2>Observers</h2>
+                <div class="controls">
+                    <input type="text" id="observer-filter" placeholder="Filter by name or ID...">
+                    <select id="observer-sort">
+                        <option value="name">Sort by Name</option>
+                        <option value="packets">Sort by Packet Count</option>
+                        <option value="snr">Sort by SNR (avg)</option>
+                        <option value="rssi">Sort by RSSI (avg)</option>
+                        <option value="status">Sort by Status</option>
+                    </select>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>Name</th>
+                                <th>ID</th>
+                                <th>Packets</th>
+                                <th>Avg SNR</th>
+                                <th>Avg RSSI</th>
+                                <th>Last Seen</th>
+                            </tr>
+                        </thead>
+                        <tbody id="observers-table-body">
+                            <tr class="empty-state">
+                                <td colspan="7">Loading observers...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Packets View -->
+            <section id="packets" class="view">
+                <h2>Recent Packets</h2>
+                <div class="controls">
+                    <button id="refresh-packets" class="btn">Refresh</button>
+                    <select id="packet-limit">
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="500">500</option>
+                        <option value="1000">1000</option>
+                    </select>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Origin</th>
+                                <th>Type</th>
+                                <th>Route</th>
+                                <th>SNR</th>
+                                <th>RSSI</th>
+                            </tr>
+                        </thead>
+                        <tbody id="packets-table-body">
+                            <tr class="empty-state">
+                                <td colspan="6">Loading packets...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Statistics View -->
+            <section id="stats" class="view">
+                <h2>Statistics</h2>
+                <div class="stats-tabs">
+                    <button class="stats-tab active" data-tab="types">Packet Types</button>
+                    <button class="stats-tab" data-tab="routes">Route Types</button>
+                    <button class="stats-tab" data-tab="per-observer">Per Observer</button>
+                </div>
+                <div id="stats-types" class="stats-tab-content active">
+                    <div class="chart-container">
+                        <canvas id="packet-types-chart"></canvas>
+                    </div>
+                </div>
+                <div id="stats-routes" class="stats-tab-content">
+                    <div class="chart-container">
+                        <canvas id="route-types-chart"></canvas>
+                    </div>
+                </div>
+                <div id="stats-per-observer" class="stats-tab-content">
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Observer</th>
+                                    <th>Packets</th>
+                                    <th>Percentage</th>
+                                </tr>
+                            </thead>
+                            <tbody id="per-observer-stats">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <div class="footer-content">
+                <span id="last-update">Last update: Never</span>
+                <span id="backend-status"></span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
