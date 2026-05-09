@@ -17,15 +17,16 @@ const state = {
     currentView: 'overview',
     packetLimit: 100,
     lastUpdate: null,
+    selectedTimeframe: '1h', // 1h, 3h, 6h, 12h
     charts: { packetRate: null, packetTypes: null, routeTypes: null, 
               timeseriesPackets: null, timeseriesObservers: null, timeseriesBuffer: null },
     history: {
-        startTime: null, // First buffer timestamp
-        packets: [],  // { t: relativeSeconds, y: packets/sec }
-        observers: [], // { t: relativeSeconds, y: count }
-        buffer: [],    // { t: relativeSeconds, y: usage }
+        startTime: null, // First buffer absolute timestamp (ms)
+        packets: [],  // { t: absoluteTimestamp, y: packets/sec }
+        observers: [], // { t: absoluteTimestamp, y: count }
+        buffer: [],    // { t: absoluteTimestamp, y: usage }
     },
-    historyMaxPoints: 60,
+    historyMaxPoints: 43200, // 12 hours at 1-second resolution
 };
 
 const elements = {
@@ -57,6 +58,7 @@ const elements = {
     timeseriesPacketsChart: document.getElementById('timeseries-packets-chart'),
     timeseriesObserversChart: document.getElementById('timeseries-observers-chart'),
     timeseriesBufferChart: document.getElementById('timeseries-buffer-chart'),
+    timeframeSelect: document.getElementById('timeframe-select'),
     topologyNodesTable: document.getElementById('topology-nodes-table'),
     topologyEdgesTable: document.getElementById('topology-edges-table'),
     alertsActiveCount: document.getElementById('alerts-active-count'),
@@ -79,20 +81,39 @@ function getStatusBadge(s) { return `<span class="status-badge ${s}">${s}</span>
 function getSeverityBadge(s) { const c = getSeverityClass(s); return `<span class="severity-badge ${c}">${s||'info'}</span>`; }
 function getSeverityClass(s) { switch((s||'').toLowerCase()) { case 'critical': return 'critical'; case 'warning': return 'warning'; default: return 'info'; } }
 
-function getRelativeTime(ts) {
-    if(state.history.startTime === null) {
-        state.history.startTime = ts;
-        return 0;
+function getTimeframeSeconds() {
+    switch(state.selectedTimeframe) {
+        case '1h': return 3600;
+        case '3h': return 10800;
+        case '6h': return 21600;
+        case '12h': return 43200;
+        default: return 3600;
     }
-    return Math.floor((ts - state.history.startTime) / 1000);
 }
 
 function addHistoryPoint(series, value, ts) {
     const timestamp = ts || Date.now();
-    const relativeT = getRelativeTime(timestamp);
-    series.push({ t: relativeT, y: value });
+    // Initialize startTime from first buffer entry
+    if(state.history.startTime === null && series === state.history.buffer) {
+        state.history.startTime = timestamp;
+    }
+    series.push({ t: timestamp, y: value });
     // Trim old points if over max
     while(series.length > state.historyMaxPoints) series.shift();
+}
+
+function filterByTimeframe(series) {
+    if(!state.history.startTime) return series;
+    const now = Date.now();
+    const timeframeMs = getTimeframeSeconds() * 1000;
+    const cutoff = now - timeframeMs;
+    // Filter points that are within the timeframe
+    return series.filter(p => p.t >= cutoff && p.t <= now);
+}
+
+function getRelativeSeconds(ts) {
+    if(state.history.startTime === null) return 0;
+    return Math.floor((ts - state.history.startTime) / 1000);
 }
 
 let ws, wsReconnectInterval;
@@ -307,7 +328,10 @@ function renderTimeseriesPacketsChart() {
     const container=elements.timeseriesPacketsChart.parentElement;
     if(!container) return;
     if(state.history.packets.length===0) return;
-    const data = state.history.packets.map(p=>({x: p.t, y: p.y}));
+    const filtered = filterByTimeframe(state.history.packets);
+    const data = filtered.map(p=>({x: getRelativeSeconds(p.t), y: p.y}));
+    const nowRel = getRelativeSeconds(Date.now());
+    const timeframeSec = getTimeframeSeconds();
     if(!state.charts.timeseriesPackets) {
         state.charts.timeseriesPackets=new Chart(elements.timeseriesPacketsChart, {
             type: 'line',
@@ -335,7 +359,9 @@ function renderTimeseriesPacketsChart() {
                     y: { beginAtZero: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
                     x: { 
                         type: 'linear',
-                        title: { display: true, text: 'Time (seconds)', color: '#94a3b8' },
+                        min: Math.max(0, nowRel - timeframeSec),
+                        max: nowRel,
+                        title: { display: true, text: 'Time (seconds from start)', color: '#94a3b8' },
                         ticks: { color: '#94a3b8', callback: (v)=>v+'s' },
                         grid: { display: false }
                     }
@@ -344,6 +370,8 @@ function renderTimeseriesPacketsChart() {
         });
     } else {
         state.charts.timeseriesPackets.data.datasets[0].data=data;
+        state.charts.timeseriesPackets.options.scales.x.min=Math.max(0, nowRel - timeframeSec);
+        state.charts.timeseriesPackets.options.scales.x.max=nowRel;
         state.charts.timeseriesPackets.update('none');
     }
 }
@@ -352,7 +380,10 @@ function renderTimeseriesObserversChart() {
     const container=elements.timeseriesObserversChart.parentElement;
     if(!container) return;
     if(state.history.observers.length===0) return;
-    const data = state.history.observers.map(p=>({x: p.t, y: p.y}));
+    const filtered = filterByTimeframe(state.history.observers);
+    const data = filtered.map(p=>({x: getRelativeSeconds(p.t), y: p.y}));
+    const nowRel = getRelativeSeconds(Date.now());
+    const timeframeSec = getTimeframeSeconds();
     if(!state.charts.timeseriesObservers) {
         state.charts.timeseriesObservers=new Chart(elements.timeseriesObserversChart, {
             type: 'line',
@@ -380,7 +411,9 @@ function renderTimeseriesObserversChart() {
                     y: { beginAtZero: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
                     x: { 
                         type: 'linear',
-                        title: { display: true, text: 'Time (seconds)', color: '#94a3b8' },
+                        min: Math.max(0, nowRel - timeframeSec),
+                        max: nowRel,
+                        title: { display: true, text: 'Time (seconds from start)', color: '#94a3b8' },
                         ticks: { color: '#94a3b8', callback: (v)=>v+'s' },
                         grid: { display: false }
                     }
@@ -389,6 +422,8 @@ function renderTimeseriesObserversChart() {
         });
     } else {
         state.charts.timeseriesObservers.data.datasets[0].data=data;
+        state.charts.timeseriesObservers.options.scales.x.min=Math.max(0, nowRel - timeframeSec);
+        state.charts.timeseriesObservers.options.scales.x.max=nowRel;
         state.charts.timeseriesObservers.update('none');
     }
 }
@@ -398,7 +433,10 @@ function renderTimeseriesBufferChart() {
     if(!container) return;
     if(state.history.buffer.length===0) return;
     const capacity=state.stats.bufferCapacity||10000;
-    const data = state.history.buffer.map(p=>({x: p.t, y: p.y}));
+    const filtered = filterByTimeframe(state.history.buffer);
+    const data = filtered.map(p=>({x: getRelativeSeconds(p.t), y: p.y}));
+    const nowRel = getRelativeSeconds(Date.now());
+    const timeframeSec = getTimeframeSeconds();
     if(!state.charts.timeseriesBuffer) {
         state.charts.timeseriesBuffer=new Chart(elements.timeseriesBufferChart, {
             type: 'line',
@@ -426,7 +464,9 @@ function renderTimeseriesBufferChart() {
                     y: { beginAtZero: true, max: capacity*1.1, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
                     x: { 
                         type: 'linear',
-                        title: { display: true, text: 'Time (seconds)', color: '#94a3b8' },
+                        min: Math.max(0, nowRel - timeframeSec),
+                        max: nowRel,
+                        title: { display: true, text: 'Time (seconds from start)', color: '#94a3b8' },
                         ticks: { color: '#94a3b8', callback: (v)=>v+'s' },
                         grid: { display: false }
                     }
@@ -436,6 +476,8 @@ function renderTimeseriesBufferChart() {
     } else {
         state.charts.timeseriesBuffer.data.datasets[0].data=data;
         state.charts.timeseriesBuffer.options.scales.y.max=capacity*1.1;
+        state.charts.timeseriesBuffer.options.scales.x.min=Math.max(0, nowRel - timeframeSec);
+        state.charts.timeseriesBuffer.options.scales.x.max=nowRel;
         state.charts.timeseriesBuffer.update('none');
     }
 }
@@ -500,6 +542,17 @@ function initEventHandlers() {
     if(elements.packetLimit) elements.packetLimit.addEventListener('change',()=>{ if(state.currentView==='packets') renderPackets(); });
     if(elements.acknowledgeAllAlerts) elements.acknowledgeAllAlerts.addEventListener('click',async()=>{ await acknowledgeAllAlerts('web'); });
     if(elements.refreshAlerts) elements.refreshAlerts.addEventListener('click',()=>{ fetchAlerts(); });
+    if(elements.timeframeSelect) {
+        elements.timeframeSelect.value=state.selectedTimeframe;
+        elements.timeframeSelect.addEventListener('change',()=>{ 
+            state.selectedTimeframe=elements.timeframeSelect.value; 
+            if(state.currentView==='overview') { 
+                renderTimeseriesPacketsChart(); 
+                renderTimeseriesObserversChart(); 
+                renderTimeseriesBufferChart(); 
+            } 
+        });
+    }
     window.addEventListener('resize',()=>{ if(state.currentView==='topology') renderTopologyCanvas(); });
     setInterval(()=>{ if(!state.wsConnected) { fetchHealth(); fetchStats(); fetchObservers(); fetchTopology(); fetchAlerts(); } },5000);
 }
