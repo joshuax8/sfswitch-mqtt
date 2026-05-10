@@ -21,7 +21,7 @@ const state = {
     charts: { packetRate: null, packetTypes: null, routeTypes: null, 
               timeseriesPackets: null, timeseriesObservers: null, timeseriesBuffer: null },
     history: {
-        startTime: null, // First buffer absolute timestamp (ms)
+        startTime: null, // First data point timestamp (ms)
         packets: [],  // { t: absoluteTimestamp, y: packets/sec }
         observers: [], // { t: absoluteTimestamp, y: count }
         buffer: [],    // { t: absoluteTimestamp, y: usage }
@@ -91,10 +91,20 @@ function getTimeframeSeconds() {
     }
 }
 
+function getTimeframeHours() {
+    switch(state.selectedTimeframe) {
+        case '1h': return 1;
+        case '3h': return 3;
+        case '6h': return 6;
+        case '12h': return 12;
+        default: return 1;
+    }
+}
+
 function addHistoryPoint(series, value, ts) {
     const timestamp = ts || Date.now();
-    // Initialize startTime from first buffer entry
-    if(state.history.startTime === null && series === state.history.buffer) {
+    // Initialize startTime from first entry
+    if(state.history.startTime === null) {
         state.history.startTime = timestamp;
     }
     series.push({ t: timestamp, y: value });
@@ -111,9 +121,34 @@ function filterByTimeframe(series) {
     return series.filter(p => p.t >= cutoff && p.t <= now);
 }
 
-function getRelativeSeconds(ts) {
-    if(state.history.startTime === null) return 0;
-    return Math.floor((ts - state.history.startTime) / 1000);
+function loadHistoryData() {
+    // Load historical data from backend for the selected timeframe
+    const hours = getTimeframeHours();
+    return Promise.all([
+        fetch(`/api/history?type=packets&hours=${hours}`).then(r=>r.json()).catch(()=>[]),
+        fetch(`/api/history?type=observers&hours=${hours}`).then(r=>r.json()).catch(()=>[]),
+        fetch(`/api/history?type=buffer&hours=${hours}`).then(r=>r.json()).catch(()=>[]),
+    ]).then(([packets, observers, buffer])=>{
+        // Convert timestamps to Date objects for consistency
+        state.history.packets = packets.map(p=>({t: new Date(p.timestamp).getTime(), y: p.value}));
+        state.history.observers = observers.map(p=>({t: new Date(p.timestamp).getTime(), y: p.value}));
+        state.history.buffer = buffer.map(p=>({t: new Date(p.timestamp).getTime(), y: p.value}));
+        // Set startTime from the oldest data point
+        const allTimestamps = [...packets, ...observers, ...buffer].map(p=>new Date(p.timestamp).getTime());
+        if(allTimestamps.length > 0) {
+            state.history.startTime = Math.min(...allTimestamps);
+        }
+    });
+}
+
+function formatAbsoluteTime(ts) {
+    return new Date(ts).toLocaleTimeString();
+}
+
+function getTimeframeStart() {
+    const now = Date.now();
+    const timeframeMs = getTimeframeSeconds() * 1000;
+    return now - timeframeMs;
 }
 
 let ws, wsReconnectInterval;
@@ -172,11 +207,11 @@ function updateStatusUI() {
     if(elements.mqttStatus){ const dot=elements.mqttStatus.querySelector('.status-dot'), txt=elements.mqttStatus.querySelector('span:last-child'); if(dot) dot.className=`status-dot ${state.mqttConnected?'online':'offline'}`; if(txt) txt.textContent=`MQTT: ${state.mqttConnected?'Connected':'Disconnected'}`; }
     if(elements.wsStatus){ const dot=elements.wsStatus.querySelector('.status-dot'), txt=elements.wsStatus.querySelector('span:last-child'); if(dot) dot.className=`status-dot ${state.wsConnected?'online':'offline'}`; if(txt) txt.textContent=`WebSocket: ${state.wsConnected?'Connected':'Disconnected'}`; }
 }
-function updateUI() {
+async function updateUI() {
     updateStatusUI();
     if(elements.lastUpdate&&state.lastUpdate) elements.lastUpdate.textContent=`Last update: ${state.lastUpdate.toLocaleString()} (${timeAgo(state.lastUpdate)})`;
     switch(state.currentView) {
-        case 'overview': renderOverview(); break;
+        case 'overview': await renderOverview(); break;
         case 'observers': renderObservers(); break;
         case 'packets': renderPackets(); break;
         case 'stats': renderStats(); break;
@@ -184,11 +219,15 @@ function updateUI() {
         case 'alerts': renderAlerts(); break;
     }
 }
-function renderOverview() {
+async function renderOverview() {
     if(elements.totalPackets) elements.totalPackets.textContent=formatNumber(state.stats.totalPackets);
     if(elements.activeObservers) elements.activeObservers.textContent=formatNumber(state.stats.observerCount);
     if(elements.packetsPerSec) elements.packetsPerSec.textContent=formatNumber(state.stats.packetsPerSecond||state.stats.windowPackets) + '/s';
     if(elements.bufferUsage) elements.bufferUsage.textContent=`${formatNumber(state.stats.bufferSize)} / ${formatNumber(state.stats.bufferCapacity)}`;
+    // Load historical data if not already loaded or timeframe changed
+    if(state.history.packets.length === 0 || state.history.observers.length === 0 || state.history.buffer.length === 0) {
+        await loadHistoryData();
+    }
     renderTimeseriesPacketsChart();
     renderTimeseriesObserversChart();
     renderTimeseriesBufferChart();
@@ -327,11 +366,10 @@ function renderTimeseriesPacketsChart() {
     if(!elements.timeseriesPacketsChart) return;
     const container=elements.timeseriesPacketsChart.parentElement;
     if(!container) return;
-    if(state.history.packets.length===0) return;
     const filtered = filterByTimeframe(state.history.packets);
-    const data = filtered.map(p=>({x: getRelativeSeconds(p.t), y: p.y}));
-    const nowRel = getRelativeSeconds(Date.now());
-    const timeframeSec = getTimeframeSeconds();
+    const data = filtered.map(p=>({x: p.t, y: p.y}));
+    const timeframeStart = getTimeframeStart();
+    const now = Date.now();
     if(!state.charts.timeseriesPackets) {
         state.charts.timeseriesPackets=new Chart(elements.timeseriesPacketsChart, {
             type: 'line',
@@ -353,16 +391,22 @@ function renderTimeseriesPacketsChart() {
                 animation: { duration: 0 },
                 plugins: {
                     legend: { display: false },
-                    tooltip: { callbacks: { label: (c)=>formatNumber(c.parsed.y) } }
+                    tooltip: { 
+                        callbacks: { 
+                            label: (c)=>formatNumber(c.parsed.y),
+                            title: (items)=>formatAbsoluteTime(items[0].raw.x)
+                        }
+                    }
                 },
                 scales: {
                     y: { beginAtZero: true, title: { display: true, text: 'Packets/sec', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
                     x: { 
-                        type: 'linear',
-                        min: Math.max(0, nowRel - timeframeSec),
-                        max: nowRel,
-                        title: { display: true, text: 'Time (seconds from start)', color: '#94a3b8' },
-                        ticks: { color: '#94a3b8', callback: (v)=>v+'s' },
+                        type: 'time',
+                        time: { unit: 'minute', tooltipFormat: 'HH:mm:ss', displayFormats: { minute: 'HH:mm' } },
+                        min: timeframeStart,
+                        max: now,
+                        title: { display: true, text: 'Time', color: '#94a3b8' },
+                        ticks: { color: '#94a3b8' },
                         grid: { display: false }
                     }
                 }
@@ -370,8 +414,8 @@ function renderTimeseriesPacketsChart() {
         });
     } else {
         state.charts.timeseriesPackets.data.datasets[0].data=data;
-        state.charts.timeseriesPackets.options.scales.x.min=Math.max(0, nowRel - timeframeSec);
-        state.charts.timeseriesPackets.options.scales.x.max=nowRel;
+        state.charts.timeseriesPackets.options.scales.x.min=timeframeStart;
+        state.charts.timeseriesPackets.options.scales.x.max=now;
         state.charts.timeseriesPackets.update('none');
     }
 }
@@ -379,11 +423,10 @@ function renderTimeseriesObserversChart() {
     if(!elements.timeseriesObserversChart) return;
     const container=elements.timeseriesObserversChart.parentElement;
     if(!container) return;
-    if(state.history.observers.length===0) return;
     const filtered = filterByTimeframe(state.history.observers);
-    const data = filtered.map(p=>({x: getRelativeSeconds(p.t), y: p.y}));
-    const nowRel = getRelativeSeconds(Date.now());
-    const timeframeSec = getTimeframeSeconds();
+    const data = filtered.map(p=>({x: p.t, y: p.y}));
+    const timeframeStart = getTimeframeStart();
+    const now = Date.now();
     if(!state.charts.timeseriesObservers) {
         state.charts.timeseriesObservers=new Chart(elements.timeseriesObserversChart, {
             type: 'line',
@@ -405,16 +448,22 @@ function renderTimeseriesObserversChart() {
                 animation: { duration: 0 },
                 plugins: {
                     legend: { display: false },
-                    tooltip: { callbacks: { label: (c)=>formatNumber(c.parsed.y) } }
+                    tooltip: { 
+                        callbacks: { 
+                            label: (c)=>formatNumber(c.parsed.y),
+                            title: (items)=>formatAbsoluteTime(items[0].raw.x)
+                        }
+                    }
                 },
                 scales: {
                     y: { beginAtZero: true, title: { display: true, text: 'Observers', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
                     x: { 
-                        type: 'linear',
-                        min: Math.max(0, nowRel - timeframeSec),
-                        max: nowRel,
-                        title: { display: true, text: 'Time (seconds from start)', color: '#94a3b8' },
-                        ticks: { color: '#94a3b8', callback: (v)=>v+'s' },
+                        type: 'time',
+                        time: { unit: 'minute', tooltipFormat: 'HH:mm:ss', displayFormats: { minute: 'HH:mm' } },
+                        min: timeframeStart,
+                        max: now,
+                        title: { display: true, text: 'Time', color: '#94a3b8' },
+                        ticks: { color: '#94a3b8' },
                         grid: { display: false }
                     }
                 }
@@ -422,8 +471,8 @@ function renderTimeseriesObserversChart() {
         });
     } else {
         state.charts.timeseriesObservers.data.datasets[0].data=data;
-        state.charts.timeseriesObservers.options.scales.x.min=Math.max(0, nowRel - timeframeSec);
-        state.charts.timeseriesObservers.options.scales.x.max=nowRel;
+        state.charts.timeseriesObservers.options.scales.x.min=timeframeStart;
+        state.charts.timeseriesObservers.options.scales.x.max=now;
         state.charts.timeseriesObservers.update('none');
     }
 }
@@ -431,12 +480,11 @@ function renderTimeseriesBufferChart() {
     if(!elements.timeseriesBufferChart) return;
     const container=elements.timeseriesBufferChart.parentElement;
     if(!container) return;
-    if(state.history.buffer.length===0) return;
     const capacity=state.stats.bufferCapacity||10000;
     const filtered = filterByTimeframe(state.history.buffer);
-    const data = filtered.map(p=>({x: getRelativeSeconds(p.t), y: p.y}));
-    const nowRel = getRelativeSeconds(Date.now());
-    const timeframeSec = getTimeframeSeconds();
+    const data = filtered.map(p=>({x: p.t, y: p.y}));
+    const timeframeStart = getTimeframeStart();
+    const now = Date.now();
     if(!state.charts.timeseriesBuffer) {
         state.charts.timeseriesBuffer=new Chart(elements.timeseriesBufferChart, {
             type: 'line',
@@ -458,16 +506,22 @@ function renderTimeseriesBufferChart() {
                 animation: { duration: 0 },
                 plugins: {
                     legend: { display: false },
-                    tooltip: { callbacks: { label: (c)=>formatNumber(c.parsed.y)+' / '+formatNumber(capacity) } }
+                    tooltip: { 
+                        callbacks: { 
+                            label: (c)=>formatNumber(c.parsed.y)+' / '+formatNumber(capacity),
+                            title: (items)=>formatAbsoluteTime(items[0].raw.x)
+                        }
+                    }
                 },
                 scales: {
                     y: { beginAtZero: true, max: capacity*1.1, title: { display: true, text: 'Packets', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
                     x: { 
-                        type: 'linear',
-                        min: Math.max(0, nowRel - timeframeSec),
-                        max: nowRel,
-                        title: { display: true, text: 'Time (seconds from start)', color: '#94a3b8' },
-                        ticks: { color: '#94a3b8', callback: (v)=>v+'s' },
+                        type: 'time',
+                        time: { unit: 'minute', tooltipFormat: 'HH:mm:ss', displayFormats: { minute: 'HH:mm' } },
+                        min: timeframeStart,
+                        max: now,
+                        title: { display: true, text: 'Time', color: '#94a3b8' },
+                        ticks: { color: '#94a3b8' },
                         grid: { display: false }
                     }
                 }
@@ -476,8 +530,8 @@ function renderTimeseriesBufferChart() {
     } else {
         state.charts.timeseriesBuffer.data.datasets[0].data=data;
         state.charts.timeseriesBuffer.options.scales.y.max=capacity*1.1;
-        state.charts.timeseriesBuffer.options.scales.x.min=Math.max(0, nowRel - timeframeSec);
-        state.charts.timeseriesBuffer.options.scales.x.max=nowRel;
+        state.charts.timeseriesBuffer.options.scales.x.min=timeframeStart;
+        state.charts.timeseriesBuffer.options.scales.x.max=now;
         state.charts.timeseriesBuffer.update('none');
     }
 }
@@ -534,7 +588,7 @@ function renderAlertsTable() {
 }
 
 function initEventHandlers() {
-    elements.navLinks.forEach(link=>{ link.addEventListener('click',(e)=>{ e.preventDefault(); const v=link.dataset.view; state.currentView=v; elements.navLinks.forEach(l=>l.classList.remove('active')); link.classList.add('active'); elements.views.forEach(vv=>vv.classList.remove('active')); document.getElementById(v)?.classList.add('active'); updateUI(); document.querySelector('.main').scrollTop=0; }); });
+    elements.navLinks.forEach(link=>{ link.addEventListener('click',async(e)=>{ e.preventDefault(); const v=link.dataset.view; state.currentView=v; elements.navLinks.forEach(l=>l.classList.remove('active')); link.classList.add('active'); elements.views.forEach(vv=>vv.classList.remove('active')); document.getElementById(v)?.classList.add('active'); await updateUI(); document.querySelector('.main').scrollTop=0; }); });
     elements.statsTabs.forEach(tab=>{ tab.addEventListener('click',()=>{ const tid=tab.dataset.tab; elements.statsTabs.forEach(t=>t.classList.remove('active')); tab.classList.add('active'); elements.statsContents.forEach(c=>c.classList.remove('active')); document.getElementById(`stats-${tid}`)?.classList.add('active'); if(state.currentView==='stats') { if(tid==='types') renderPacketTypesChart(); if(tid==='routes') renderRouteTypesChart(); } }); });
     if(elements.observerFilter) elements.observerFilter.addEventListener('input',()=>{ if(state.currentView==='observers') renderObservers(); });
     if(elements.observerSort) elements.observerSort.addEventListener('change',()=>{ if(state.currentView==='observers') renderObservers(); });
@@ -544,9 +598,10 @@ function initEventHandlers() {
     if(elements.refreshAlerts) elements.refreshAlerts.addEventListener('click',()=>{ fetchAlerts(); });
     if(elements.timeframeSelect) {
         elements.timeframeSelect.value=state.selectedTimeframe;
-        elements.timeframeSelect.addEventListener('change',()=>{ 
+        elements.timeframeSelect.addEventListener('change',async()=>{ 
             state.selectedTimeframe=elements.timeframeSelect.value; 
             if(state.currentView==='overview') { 
+                await loadHistoryData();
                 renderTimeseriesPacketsChart(); 
                 renderTimeseriesObserversChart(); 
                 renderTimeseriesBufferChart(); 
@@ -557,10 +612,10 @@ function initEventHandlers() {
     setInterval(()=>{ if(!state.wsConnected) { fetchHealth(); fetchStats(); fetchObservers(); fetchTopology(); fetchAlerts(); } },5000);
 }
 
-function init() {
+async function init() {
     const hash=window.location.hash.substring(1)||'overview'; state.currentView=hash;
     const al=document.querySelector(`.nav-link[data-view="${state.currentView}"]`); if(al) al.classList.add('active');
     const av=document.getElementById(state.currentView); if(av) av.classList.add('active');
-    connectWebSocket(); initEventHandlers(); updateUI();
+    connectWebSocket(); initEventHandlers(); await updateUI();
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();

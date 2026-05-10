@@ -554,6 +554,47 @@ class DataStore {
       this.db.exec(`
         CREATE INDEX IF NOT EXISTS idx_timestamp ON packets(timestamp)
       `);
+      
+      // Time-series history tables
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS history_packets (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          timestamp DATETIME NOT NULL,
+          value REAL NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS history_observers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          timestamp DATETIME NOT NULL,
+          value INTEGER NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS history_buffer (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          timestamp DATETIME NOT NULL,
+          value INTEGER NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_history_packets_ts ON history_packets(timestamp)
+      `);
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_history_observers_ts ON history_observers(timestamp)
+      `);
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_history_buffer_ts ON history_buffer(timestamp)
+      `);
+      
+      // Clean up old history data (keep last 12 hours)
+      const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+      this.db.exec(`DELETE FROM history_packets WHERE timestamp < ?`, [twelveHoursAgo]);
+      this.db.exec(`DELETE FROM history_observers WHERE timestamp < ?`, [twelveHoursAgo]);
+      this.db.exec(`DELETE FROM history_buffer WHERE timestamp < ?`, [twelveHoursAgo]);
     } catch (err) {
       console.error('SQLite initialization failed, running in-memory only:', err.message);
       this.db = null;
@@ -626,6 +667,45 @@ class DataStore {
       bufferCapacity: this.ringBuffer.maxSize,
       observerCount: this.observerTracker.count,
     };
+  }
+
+  // Save history data point
+  saveHistory(type, timestamp, value) {
+    if (!this.db) return;
+    try {
+      let table;
+      switch(type) {
+        case 'packets': table = 'history_packets'; break;
+        case 'observers': table = 'history_observers'; break;
+        case 'buffer': table = 'history_buffer'; break;
+        default: return;
+      }
+      const stmt = this.db.prepare(`INSERT INTO ${table} (timestamp, value) VALUES (?, ?)`);
+      stmt.run(timestamp, value);
+    } catch (err) {
+      console.error('History save error:', err.message);
+    }
+  }
+
+  // Get history data for a time range
+  getHistory(type, hours = 12) {
+    if (!this.db) return [];
+    try {
+      let table;
+      switch(type) {
+        case 'packets': table = 'history_packets'; break;
+        case 'observers': table = 'history_observers'; break;
+        case 'buffer': table = 'history_buffer'; break;
+        default: return [];
+      }
+      const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+      const stmt = this.db.prepare(`SELECT timestamp, value FROM ${table} WHERE timestamp >= ? ORDER BY timestamp ASC`);
+      const rows = stmt.all(cutoff);
+      return rows.map(r => ({ timestamp: r.timestamp, value: r.value }));
+    } catch (err) {
+      console.error('History fetch error:', err.message);
+      return [];
+    }
   }
 
   getHealth() {

@@ -50,6 +50,20 @@ function handleApiRequest(req, res, url) {
       return;
     }
 
+    if (path === '/api/history') {
+      const type = url.searchParams.get('type'); // 'packets', 'observers', 'buffer'
+      const hours = parseInt(url.searchParams.get('hours')) || 12;
+      if (!type || !['packets', 'observers', 'buffer'].includes(type)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid type. Use: packets, observers, buffer' }));
+        return;
+      }
+      const history = store.getHistory(type, hours);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(history));
+      return;
+    }
+
     if (path === '/api/observers') {
       const observers = store.getAllObservers();
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -180,7 +194,14 @@ function broadcastUpdate(type, data) {
 
 // Periodic stats broadcast
 setInterval(() => {
-  broadcastUpdate('stats', store.getStats());
+  const stats = store.getStats();
+  broadcastUpdate('stats', stats);
+  
+  // Save history data
+  const now = new Date().toISOString();
+  store.saveHistory('packets', now, stats.packetsPerSecond || 0);
+  store.saveHistory('observers', now, stats.observerCount || 0);
+  store.saveHistory('buffer', now, stats.bufferSize || 0);
   
   // Broadcast topology if enabled
   if (config.PARSE_RAW_PACKETS) {

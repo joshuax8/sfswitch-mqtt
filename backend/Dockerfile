@@ -17,6 +17,7 @@ COPY package*.json ./
 COPY src/ ./src/
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN mkdir -p /data && chown appuser:appgroup /data
 USER appuser
 
 EXPOSE 3000 3001
