@@ -177,12 +177,19 @@ class AggregationStore {
   }
 
   getStats() {
+    const now = Date.now();
+    const elapsedMs = now - this.windowStart;
+    const elapsedSec = elapsedMs / 1000;
+    // Calculate packets per second in current window
+    const packetsPerSecond = elapsedSec > 0 ? this.windowPackets / elapsedSec : 0;
     return {
       totalPackets: this.totalPackets,
       packetsPerObserver: Object.fromEntries(this.packetsPerObserver),
       packetTypes: Object.fromEntries(this.packetTypes),
       routeTypes: Object.fromEntries(this.routeTypes),
       windowPackets: this.windowPackets,
+      packetsPerSecond: parseFloat(packetsPerSecond.toFixed(2)),
+      windowElapsed: parseFloat(elapsedSec.toFixed(2)),
     };
   }
 

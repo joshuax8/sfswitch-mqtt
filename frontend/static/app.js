@@ -136,11 +136,11 @@ function handleWS(data) {
         case 'init': state.stats=data.stats; state.observers=data.observers; 
                       // Record buffer first to set startTime
                       addHistoryPoint(state.history.buffer, data.stats?.bufferSize||0);
-                      addHistoryPoint(state.history.packets, data.stats?.windowPackets||0);
+                      addHistoryPoint(state.history.packets, data.stats?.packetsPerSecond||0);
                       addHistoryPoint(state.history.observers, data.stats?.observerCount||0); break;
         case 'stats': state.stats=data.data; 
                       addHistoryPoint(state.history.buffer, data.data?.bufferSize||0);
-                      addHistoryPoint(state.history.packets, data.data?.windowPackets||0);
+                      addHistoryPoint(state.history.packets, data.data?.packetsPerSecond||0);
                       addHistoryPoint(state.history.observers, data.data?.observerCount||0); break;
         case 'packets': state.packets=data.data; break;
         case 'observers': state.observers=data.data; break;
@@ -156,7 +156,7 @@ async function fetchStats() {
         state.stats=d; 
         // Record buffer first to set startTime
         addHistoryPoint(state.history.buffer, d?.bufferSize||0);
-        addHistoryPoint(state.history.packets, d?.windowPackets||0);
+        addHistoryPoint(state.history.packets, d?.packetsPerSecond||0);
         addHistoryPoint(state.history.observers, d?.observerCount||0);
         state.lastUpdate=new Date(); updateUI(); 
     } catch(e){console.error('Fetch stats:',e);} 
@@ -187,7 +187,7 @@ function updateUI() {
 function renderOverview() {
     if(elements.totalPackets) elements.totalPackets.textContent=formatNumber(state.stats.totalPackets);
     if(elements.activeObservers) elements.activeObservers.textContent=formatNumber(state.stats.observerCount);
-    if(elements.packetsPerSec) elements.packetsPerSec.textContent=formatNumber(state.stats.windowPackets);
+    if(elements.packetsPerSec) elements.packetsPerSec.textContent=formatNumber(state.stats.packetsPerSecond||state.stats.windowPackets) + '/s';
     if(elements.bufferUsage) elements.bufferUsage.textContent=`${formatNumber(state.stats.bufferSize)} / ${formatNumber(state.stats.bufferCapacity)}`;
     renderTimeseriesPacketsChart();
     renderTimeseriesObserversChart();
@@ -337,7 +337,7 @@ function renderTimeseriesPacketsChart() {
             type: 'line',
             data: {
                 datasets: [{
-                    label: 'Packets/sec',
+                    label: 'Packets/sec (rate)',
                     data: data,
                     borderColor: '#3b82f6',
                     backgroundColor: 'rgba(59,130,246,0.1)',
@@ -356,7 +356,7 @@ function renderTimeseriesPacketsChart() {
                     tooltip: { callbacks: { label: (c)=>formatNumber(c.parsed.y) } }
                 },
                 scales: {
-                    y: { beginAtZero: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                    y: { beginAtZero: true, title: { display: true, text: 'Packets/sec', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
                     x: { 
                         type: 'linear',
                         min: Math.max(0, nowRel - timeframeSec),
@@ -408,7 +408,7 @@ function renderTimeseriesObserversChart() {
                     tooltip: { callbacks: { label: (c)=>formatNumber(c.parsed.y) } }
                 },
                 scales: {
-                    y: { beginAtZero: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                    y: { beginAtZero: true, title: { display: true, text: 'Observers', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
                     x: { 
                         type: 'linear',
                         min: Math.max(0, nowRel - timeframeSec),
@@ -461,7 +461,7 @@ function renderTimeseriesBufferChart() {
                     tooltip: { callbacks: { label: (c)=>formatNumber(c.parsed.y)+' / '+formatNumber(capacity) } }
                 },
                 scales: {
-                    y: { beginAtZero: true, max: capacity*1.1, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                    y: { beginAtZero: true, max: capacity*1.1, title: { display: true, text: 'Packets', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
                     x: { 
                         type: 'linear',
                         min: Math.max(0, nowRel - timeframeSec),
