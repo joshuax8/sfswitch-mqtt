@@ -121,24 +121,23 @@ function filterByTimeframe(series) {
     return series.filter(p => p.t >= cutoff && p.t <= now);
 }
 
-function loadHistoryData() {
+async function loadHistoryData() {
     // Load historical data from backend for the selected timeframe
     const hours = getTimeframeHours();
-    return Promise.all([
+    const [packets, observers, buffer] = await Promise.all([
         fetch(`/api/history?type=packets&hours=${hours}`).then(r=>r.json()).catch(()=>[]),
         fetch(`/api/history?type=observers&hours=${hours}`).then(r=>r.json()).catch(()=>[]),
         fetch(`/api/history?type=buffer&hours=${hours}`).then(r=>r.json()).catch(()=>[]),
-    ]).then(([packets, observers, buffer])=>{
-        // Convert timestamps to Date objects for consistency
-        state.history.packets = packets.map(p=>({t: new Date(p.timestamp).getTime(), y: p.value}));
-        state.history.observers = observers.map(p=>({t: new Date(p.timestamp).getTime(), y: p.value}));
-        state.history.buffer = buffer.map(p=>({t: new Date(p.timestamp).getTime(), y: p.value}));
-        // Set startTime from the oldest data point
-        const allTimestamps = [...packets, ...observers, ...buffer].map(p=>new Date(p.timestamp).getTime());
-        if(allTimestamps.length > 0) {
-            state.history.startTime = Math.min(...allTimestamps);
-        }
-    });
+    ]);
+    // Convert timestamps to Date objects for consistency
+    state.history.packets = packets.map(p=>({t: new Date(p.timestamp).getTime(), y: p.value}));
+    state.history.observers = observers.map(p=>({t: new Date(p.timestamp).getTime(), y: p.value}));
+    state.history.buffer = buffer.map(p=>({t: new Date(p.timestamp).getTime(), y: p.value}));
+    // Set startTime from the oldest data point
+    const allTimestamps = [...packets, ...observers, ...buffer].map(p=>new Date(p.timestamp).getTime());
+    if(allTimestamps.length > 0) {
+        state.history.startTime = Math.min(...allTimestamps);
+    }
 }
 
 function formatAbsoluteTime(ts) {
