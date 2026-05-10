@@ -361,181 +361,160 @@ function renderRouteTypesChart() {
         state.charts.routeTypes.update('none');
     }
 }
+// Helper function to safely create or update a timeseries chart
+function createTimeseriesChart(canvasId, data, options) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return null;
+    
+    const chartKey = `timeseries${canvasId.charAt(0).toUpperCase() + canvasId.slice(1)}`;
+    
+    // Destroy existing chart if it exists
+    if (state.charts[chartKey]) {
+        state.charts[chartKey].destroy();
+        state.charts[chartKey] = null;
+    }
+    
+    // Create new chart
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: { datasets: [options.dataset] },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 0 },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: options.labelCallback,
+                        title: (items) => formatAbsoluteTime(items[0].raw.x)
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: options.yLabel, color: '#94a3b8' },
+                    ticks: { color: '#94a3b8' },
+                    grid: { color: 'rgba(255,255,255,0.1)' },
+                    max: options.yMax
+                },
+                x: {
+                    type: 'time',
+                    time: { unit: 'minute', tooltipFormat: 'HH:mm:ss', displayFormats: { minute: 'HH:mm' } },
+                    min: options.xMin,
+                    max: options.xMax,
+                    title: { display: true, text: 'Time', color: '#94a3b8' },
+                    ticks: { color: '#94a3b8' },
+                    grid: { display: false }
+                }
+            }
+        }
+    });
+    
+    state.charts[chartKey] = chart;
+    return chart;
+}
+
+// Helper to update existing chart or create new one
+function updateTimeseriesChart(canvasId, data, chartKey, datasetConfig, yLabel, yMax, labelCallback) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    
+    const timeframeStart = getTimeframeStart();
+    const now = Date.now();
+    
+    const existing = state.charts[chartKey];
+    
+    if (existing) {
+        existing.data.datasets[0].data = data;
+        existing.options.scales.x.min = timeframeStart;
+        existing.options.scales.x.max = now;
+        if (yMax !== undefined) existing.options.scales.y.max = yMax;
+        existing.update('none');
+    } else {
+        createTimeseriesChart(canvasId, data, {
+            dataset: { ...datasetConfig, data },
+            yLabel,
+            xMin: timeframeStart,
+            xMax: now,
+            yMax,
+            labelCallback
+        });
+    }
+}
+
 function renderTimeseriesPacketsChart() {
     if(!elements.timeseriesPacketsChart) return;
-    const container=elements.timeseriesPacketsChart.parentElement;
-    if(!container) return;
     const filtered = filterByTimeframe(state.history.packets);
     const data = filtered.map(p=>({x: p.t, y: p.y}));
-    const timeframeStart = getTimeframeStart();
-    const now = Date.now();
-    if(state.charts.timeseriesPackets) {
-        state.charts.timeseriesPackets.data.datasets[0].data=data;
-        state.charts.timeseriesPackets.options.scales.x.min=timeframeStart;
-        state.charts.timeseriesPackets.options.scales.x.max=now;
-        state.charts.timeseriesPackets.update('none');
-    } else {
-        if(elements.timeseriesPacketsChart.chart) elements.timeseriesPacketsChart.chart.destroy();
-        state.charts.timeseriesPackets=new Chart(elements.timeseriesPacketsChart, {
-            type: 'line',
-            data: {
-                datasets: [{
-                    label: 'Packets/sec (rate)',
-                    data: data,
-                    borderColor: '#3b82f6',
-                    backgroundColor: 'rgba(59,130,246,0.1)',
-                    fill: true,
-                    tension: 0.4,
-                    borderWidth: 2,
-                    pointRadius: 0
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: { duration: 0 },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: { 
-                        callbacks: { 
-                            label: (c)=>formatNumber(c.parsed.y),
-                            title: (items)=>formatAbsoluteTime(items[0].raw.x)
-                        }
-                    }
-                },
-                scales: {
-                    y: { beginAtZero: true, title: { display: true, text: 'Packets/sec', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
-                    x: { 
-                        type: 'time',
-                        time: { unit: 'minute', tooltipFormat: 'HH:mm:ss', displayFormats: { minute: 'HH:mm' } },
-                        min: timeframeStart,
-                        max: now,
-                        title: { display: true, text: 'Time', color: '#94a3b8' },
-                        ticks: { color: '#94a3b8' },
-                        grid: { display: false }
-                    }
-                }
-            }
-        });
-    }
+    updateTimeseriesChart(
+        'timeseries-packets-chart',
+        data,
+        'timeseriesPackets',
+        {
+            label: 'Packets/sec (rate)',
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59,130,246,0.1)',
+            fill: true,
+            tension: 0.4,
+            borderWidth: 2,
+            pointRadius: 0
+        },
+        'Packets/sec',
+        undefined,
+        (c) => formatNumber(c.parsed.y)
+    );
 }
+
 function renderTimeseriesObserversChart() {
     if(!elements.timeseriesObserversChart) return;
-    const container=elements.timeseriesObserversChart.parentElement;
-    if(!container) return;
     const filtered = filterByTimeframe(state.history.observers);
     const data = filtered.map(p=>({x: p.t, y: p.y}));
-    const timeframeStart = getTimeframeStart();
-    const now = Date.now();
-    if(state.charts.timeseriesObservers) {
-        state.charts.timeseriesObservers.data.datasets[0].data=data;
-        state.charts.timeseriesObservers.options.scales.x.min=timeframeStart;
-        state.charts.timeseriesObservers.options.scales.x.max=now;
-        state.charts.timeseriesObservers.update('none');
-    } else {
-        if(elements.timeseriesObserversChart.chart) elements.timeseriesObserversChart.chart.destroy();
-        state.charts.timeseriesObservers=new Chart(elements.timeseriesObserversChart, {
-            type: 'line',
-            data: {
-                datasets: [{
-                    label: 'Active Observers',
-                    data: data,
-                    borderColor: '#10b981',
-                    backgroundColor: 'rgba(16,185,129,0.1)',
-                    fill: true,
-                    tension: 0.4,
-                    borderWidth: 2,
-                    pointRadius: 0
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: { duration: 0 },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: { 
-                        callbacks: { 
-                            label: (c)=>formatNumber(c.parsed.y),
-                            title: (items)=>formatAbsoluteTime(items[0].raw.x)
-                        }
-                    }
-                },
-                scales: {
-                    y: { beginAtZero: true, title: { display: true, text: 'Observers', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
-                    x: { 
-                        type: 'time',
-                        time: { unit: 'minute', tooltipFormat: 'HH:mm:ss', displayFormats: { minute: 'HH:mm' } },
-                        min: timeframeStart,
-                        max: now,
-                        title: { display: true, text: 'Time', color: '#94a3b8' },
-                        ticks: { color: '#94a3b8' },
-                        grid: { display: false }
-                    }
-                }
-            }
-        });
-    }
+    updateTimeseriesChart(
+        'timeseries-observers-chart',
+        data,
+        'timeseriesObservers',
+        {
+            label: 'Active Observers',
+            borderColor: '#10b981',
+            backgroundColor: 'rgba(16,185,129,0.1)',
+            fill: true,
+            tension: 0.4,
+            borderWidth: 2,
+            pointRadius: 0
+        },
+        'Observers',
+        undefined,
+        (c) => formatNumber(c.parsed.y)
+    );
 }
+
 function renderTimeseriesBufferChart() {
     if(!elements.timeseriesBufferChart) return;
-    const container=elements.timeseriesBufferChart.parentElement;
-    if(!container) return;
-    const capacity=state.stats.bufferCapacity||10000;
+    const capacity = state.stats.bufferCapacity || 10000;
     const filtered = filterByTimeframe(state.history.buffer);
     const data = filtered.map(p=>({x: p.t, y: p.y}));
-    const timeframeStart = getTimeframeStart();
-    const now = Date.now();
-    if(state.charts.timeseriesBuffer) {
-        state.charts.timeseriesBuffer.data.datasets[0].data=data;
-        state.charts.timeseriesBuffer.options.scales.y.max=capacity*1.1;
-        state.charts.timeseriesBuffer.options.scales.x.min=timeframeStart;
-        state.charts.timeseriesBuffer.options.scales.x.max=now;
-        state.charts.timeseriesBuffer.update('none');
-    } else {
-        if(elements.timeseriesBufferChart.chart) elements.timeseriesBufferChart.chart.destroy();
-        state.charts.timeseriesBuffer=new Chart(elements.timeseriesBufferChart, {
-            type: 'line',
-            data: {
-                datasets: [{
-                    label: 'Buffer Usage',
-                    data: data,
-                    borderColor: '#f59e0b',
-                    backgroundColor: 'rgba(245,158,11,0.1)',
-                    fill: true,
-                    tension: 0.4,
-                    borderWidth: 2,
-                    pointRadius: 0
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: { duration: 0 },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: { 
-                        callbacks: { 
-                            label: (c)=>formatNumber(c.parsed.y)+' / '+formatNumber(capacity),
-                            title: (items)=>formatAbsoluteTime(items[0].raw.x)
-                        }
-                    }
-                },
-                scales: {
-                    y: { beginAtZero: true, max: capacity*1.1, title: { display: true, text: 'Packets', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
-                    x: { 
-                        type: 'time',
-                        time: { unit: 'minute', tooltipFormat: 'HH:mm:ss', displayFormats: { minute: 'HH:mm' } },
-                        min: timeframeStart,
-                        max: now,
-                        title: { display: true, text: 'Time', color: '#94a3b8' },
-                        ticks: { color: '#94a3b8' },
-                        grid: { display: false }
-                    }
-                }
-            }
-        });
-    }
+    updateTimeseriesChart(
+        'timeseries-buffer-chart',
+        data,
+        'timeseriesBuffer',
+        {
+            label: 'Buffer Usage',
+            borderColor: '#f59e0b',
+            backgroundColor: 'rgba(245,158,11,0.1)',
+            fill: true,
+            tension: 0.4,
+            borderWidth: 2,
+            pointRadius: 0
+        },
+        'Packets',
+        capacity * 1.1,
+        (c) => formatNumber(c.parsed.y) + ' / ' + formatNumber(capacity)
+    );
 }
 function renderTopology() {
     if(elements.topologyNodeCount) elements.topologyNodeCount.textContent=formatNumber(state.topology.nodes?.length||0);
