@@ -367,6 +367,7 @@ function renderTimeseriesPacketsChart() {
     const container=elements.timeseriesPacketsChart.parentElement;
     if(!container) return;
     const filtered = filterByTimeframe(state.history.packets);
+    if(filtered.length === 0) return;
     const data = filtered.map(p=>({x: p.t, y: p.y}));
     const timeframeStart = getTimeframeStart();
     const now = Date.now();
@@ -424,6 +425,7 @@ function renderTimeseriesObserversChart() {
     const container=elements.timeseriesObserversChart.parentElement;
     if(!container) return;
     const filtered = filterByTimeframe(state.history.observers);
+    if(filtered.length === 0) return;
     const data = filtered.map(p=>({x: p.t, y: p.y}));
     const timeframeStart = getTimeframeStart();
     const now = Date.now();
@@ -482,6 +484,7 @@ function renderTimeseriesBufferChart() {
     if(!container) return;
     const capacity=state.stats.bufferCapacity||10000;
     const filtered = filterByTimeframe(state.history.buffer);
+    if(filtered.length === 0) return;
     const data = filtered.map(p=>({x: p.t, y: p.y}));
     const timeframeStart = getTimeframeStart();
     const now = Date.now();
