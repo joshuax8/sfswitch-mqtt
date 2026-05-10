@@ -366,11 +366,16 @@ function renderTimeseriesPacketsChart() {
     const container=elements.timeseriesPacketsChart.parentElement;
     if(!container) return;
     const filtered = filterByTimeframe(state.history.packets);
-    if(filtered.length === 0) return;
     const data = filtered.map(p=>({x: p.t, y: p.y}));
     const timeframeStart = getTimeframeStart();
     const now = Date.now();
-    if(!state.charts.timeseriesPackets) {
+    if(state.charts.timeseriesPackets) {
+        state.charts.timeseriesPackets.data.datasets[0].data=data;
+        state.charts.timeseriesPackets.options.scales.x.min=timeframeStart;
+        state.charts.timeseriesPackets.options.scales.x.max=now;
+        state.charts.timeseriesPackets.update('none');
+    } else {
+        if(elements.timeseriesPacketsChart.chart) elements.timeseriesPacketsChart.chart.destroy();
         state.charts.timeseriesPackets=new Chart(elements.timeseriesPacketsChart, {
             type: 'line',
             data: {
@@ -412,11 +417,6 @@ function renderTimeseriesPacketsChart() {
                 }
             }
         });
-    } else {
-        state.charts.timeseriesPackets.data.datasets[0].data=data;
-        state.charts.timeseriesPackets.options.scales.x.min=timeframeStart;
-        state.charts.timeseriesPackets.options.scales.x.max=now;
-        state.charts.timeseriesPackets.update('none');
     }
 }
 function renderTimeseriesObserversChart() {
@@ -424,11 +424,16 @@ function renderTimeseriesObserversChart() {
     const container=elements.timeseriesObserversChart.parentElement;
     if(!container) return;
     const filtered = filterByTimeframe(state.history.observers);
-    if(filtered.length === 0) return;
     const data = filtered.map(p=>({x: p.t, y: p.y}));
     const timeframeStart = getTimeframeStart();
     const now = Date.now();
-    if(!state.charts.timeseriesObservers) {
+    if(state.charts.timeseriesObservers) {
+        state.charts.timeseriesObservers.data.datasets[0].data=data;
+        state.charts.timeseriesObservers.options.scales.x.min=timeframeStart;
+        state.charts.timeseriesObservers.options.scales.x.max=now;
+        state.charts.timeseriesObservers.update('none');
+    } else {
+        if(elements.timeseriesObserversChart.chart) elements.timeseriesObserversChart.chart.destroy();
         state.charts.timeseriesObservers=new Chart(elements.timeseriesObserversChart, {
             type: 'line',
             data: {
@@ -470,11 +475,6 @@ function renderTimeseriesObserversChart() {
                 }
             }
         });
-    } else {
-        state.charts.timeseriesObservers.data.datasets[0].data=data;
-        state.charts.timeseriesObservers.options.scales.x.min=timeframeStart;
-        state.charts.timeseriesObservers.options.scales.x.max=now;
-        state.charts.timeseriesObservers.update('none');
     }
 }
 function renderTimeseriesBufferChart() {
@@ -483,11 +483,17 @@ function renderTimeseriesBufferChart() {
     if(!container) return;
     const capacity=state.stats.bufferCapacity||10000;
     const filtered = filterByTimeframe(state.history.buffer);
-    if(filtered.length === 0) return;
     const data = filtered.map(p=>({x: p.t, y: p.y}));
     const timeframeStart = getTimeframeStart();
     const now = Date.now();
-    if(!state.charts.timeseriesBuffer) {
+    if(state.charts.timeseriesBuffer) {
+        state.charts.timeseriesBuffer.data.datasets[0].data=data;
+        state.charts.timeseriesBuffer.options.scales.y.max=capacity*1.1;
+        state.charts.timeseriesBuffer.options.scales.x.min=timeframeStart;
+        state.charts.timeseriesBuffer.options.scales.x.max=now;
+        state.charts.timeseriesBuffer.update('none');
+    } else {
+        if(elements.timeseriesBufferChart.chart) elements.timeseriesBufferChart.chart.destroy();
         state.charts.timeseriesBuffer=new Chart(elements.timeseriesBufferChart, {
             type: 'line',
             data: {
@@ -529,12 +535,6 @@ function renderTimeseriesBufferChart() {
                 }
             }
         });
-    } else {
-        state.charts.timeseriesBuffer.data.datasets[0].data=data;
-        state.charts.timeseriesBuffer.options.scales.y.max=capacity*1.1;
-        state.charts.timeseriesBuffer.options.scales.x.min=timeframeStart;
-        state.charts.timeseriesBuffer.options.scales.x.max=now;
-        state.charts.timeseriesBuffer.update('none');
     }
 }
 function renderTopology() {
